@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Liberty Bell Health — CRM</title>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
+
+/* ---- LAYOUT ---- */
+.app{display:flex;height:100vh;overflow:hidden;}
+.sidebar{width:220px;background:#1a3a5c;color:#fff;display:flex;flex-direction:column;flex-shrink:0;}
+.sidebar .logo{padding:16px;font-size:15px;font-weight:bold;border-bottom:1px solid rgba(255,255,255,0.1);line-height:1.3;}
+.sidebar .logo span{font-size:11px;opacity:0.7;display:block;font-weight:normal;}
+.nav-btn{padding:12px 16px;cursor:pointer;font-size:13px;border:none;background:none;color:#fff;text-align:left;width:100%;opacity:0.8;}
+.nav-btn:hover,.nav-btn.active{background:rgba(255,255,255,0.15);opacity:1;}
+.sidebar .auth-area{margin-top:auto;padding:12px;border-top:1px solid rgba(255,255,255,0.1);font-size:11px;}
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column;}
+
+/* ---- TOOLBAR ---- */
+.topbar{background:#fff;border-bottom:1px solid #ddd;padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.topbar h2{font-size:15px;flex:1;}
+.btn{padding:7px 14px;border:1px solid #ccc;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;font-family:Arial,sans-serif;}
+.btn:hover{background:#f0f0f0;}
+.btn-blue{background:#1a3a5c;color:#fff;border-color:#1a3a5c;}
+.btn-blue:hover{background:#142d47;}
+.btn-green{background:#28a745;color:#fff;border-color:#28a745;}
+.btn-green:hover{background:#218838;}
+.btn-red{background:#dc3545;color:#fff;border-color:#dc3545;}
+.btn-red:hover{background:#c82333;}
+.btn-orange{background:#fd7e14;color:#fff;border-color:#fd7e14;}
+
+/* ---- SEARCH BAR ---- */
+.search-bar{background:#fff;border-bottom:1px solid #ddd;padding:10px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.search-bar input,.search-bar select{padding:6px 10px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:Arial,sans-serif;}
+.search-bar input{width:200px;}
+
+/* ---- CLIENT LIST ---- */
+.client-list{padding:12px 16px;flex:1;}
+.client-table{width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);}
+.client-table th{background:#1a3a5c;color:#fff;padding:9px 10px;text-align:left;font-size:12px;font-weight:600;}
+.client-table td{padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;}
+.client-table tr:hover td{background:#f0f4f8;cursor:pointer;}
+.client-table tr.selected td{background:#dbeafe;}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:bold;}
+.badge-blue{background:#dbeafe;color:#1a3a5c;}
+.badge-green{background:#d1fae5;color:#065f46;}
+.badge-orange{background:#ffedd5;color:#92400e;}
+.badge-red{background:#fee2e2;color:#991b1b;}
+.empty-state{text-align:center;padding:40px;color:#999;}
+
+/* ---- CLIENT FORM ---- */
+.form-wrap{padding:16px;display:none;}
+.form-wrap.active{display:block;}
+.form-card{background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.1);overflow:hidden;}
+.form-section{padding:12px 16px;border-bottom:1px solid #eee;}
+.form-section-title{font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.5px;color:#1a3a5c;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #e5e7eb;}
+.form-grid{display:grid;gap:8px;}
+.g2{grid-template-columns:1fr 1fr;}
+.g3{grid-template-columns:1fr 1fr 1fr;}
+.g4{grid-template-columns:1fr 1fr 1fr 1fr;}
+.g5{grid-template-columns:1fr 1fr 1fr 1fr 1fr;}
+.field{display:flex;flex-direction:column;gap:2px;}
+.field label{font-size:10px;color:#666;font-weight:600;}
+.field input,.field select,.field textarea{padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:Arial,sans-serif;background:#fff;}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:#1a3a5c;outline:none;}
+.field textarea{resize:vertical;min-height:60px;}
+.form-actions{padding:12px 16px;display:flex;gap:8px;background:#f9fafb;border-top:1px solid #eee;}
+
+/* ---- MEMBER ROW ---- */
+.member-row{display:grid;grid-template-columns:1fr 1fr 60px 80px 60px 60px 80px 40px;gap:6px;align-items:end;margin-bottom:6px;}
+.member-row .field label{font-size:9px;}
+.add-row-btn{font-size:11px;padding:4px 10px;margin-top:4px;}
+
+/* ---- MEDICATION ROW ---- */
+.med-row{display:grid;grid-template-columns:2fr 1fr 1fr 30px;gap:6px;align-items:end;margin-bottom:6px;}
+
+/* ---- DOCTOR ROW ---- */
+.doc-row{display:grid;grid-template-columns:2fr 1fr 30px;gap:6px;align-items:end;margin-bottom:6px;}
+
+/* ---- IMPORT ---- */
+.import-wrap{padding:16px;display:none;}
+.import-wrap.active{display:block;}
+.import-card{background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;}
+.import-card h3{margin-bottom:12px;font-size:14px;}
+.drop-zone{border:2px dashed #ccc;border-radius:6px;padding:30px;text-align:center;color:#999;cursor:pointer;margin-bottom:12px;}
+.drop-zone:hover{border-color:#1a3a5c;color:#1a3a5c;}
+.mapping-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px;}
+.mapping-table th{background:#f0f4f8;padding:6px 8px;text-align:left;border:1px solid #ddd;}
+.mapping-table td{padding:5px 8px;border:1px solid #ddd;}
+.mapping-table select{width:100%;padding:3px;font-size:11px;border:1px solid #ccc;border-radius:3px;}
+
+/* ---- REPORTS ---- */
+.reports-wrap{padding:16px;display:none;}
+.reports-wrap.active{display:block;}
+.report-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;}
+.report-card{background:#fff;border-radius:6px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);cursor:pointer;}
+.report-card:hover{box-shadow:0 2px 6px rgba(0,0,0,0.15);}
+.report-card .num{font-size:28px;font-weight:bold;color:#1a3a5c;}
+.report-card .lbl{font-size:11px;color:#666;margin-top:4px;}
+.report-result{background:#fff;border-radius:6px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);}
+
+/* ---- AUTH ---- */
+.auth-screen{display:flex;align-items:center;justify-content:center;height:100vh;background:#f4f6f9;}
+.auth-box{background:#fff;border-radius:8px;padding:40px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.1);max-width:400px;width:100%;}
+.auth-box .logo{font-size:22px;font-weight:bold;color:#1a3a5c;margin-bottom:4px;}
+.auth-box p{color:#666;font-size:13px;margin-bottom:24px;}
+
+@media print{
+  .sidebar,.topbar,.search-bar,.form-actions{display:none!important;}
+}
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="authScreen" class="auth-screen">
+  <div class="auth-box">
+    <div class="logo">Liberty Bell Health</div>
+    <p>Sign in with your Microsoft 365 account to access the CRM</p>
+    <button class="btn btn-blue" onclick="signIn()" style="width:100%;padding:10px;">Sign In with Microsoft</button>
+    <div id="authError" style="color:#dc3545;font-size:11px;margin-top:10px;"></div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="mainApp" class="app" style="display:none;">
+  <div class="sidebar">
+    <div class="logo">Liberty Bell Health<span>Client CRM</span></div>
+    <button class="nav-btn active" id="navClients" onclick="showView('clients')">&#128101; Clients</button>
+    <button class="nav-btn" id="navNew" onclick="showView('new')">&#43; New Client</button>
+    <button class="nav-btn" id="navImport" onclick="showView('import')">&#8593; Import CSV</button>
+    <button class="nav-btn" id="navReports" onclick="showView('reports')">&#128202; Reports</button>
+    <div class="auth-area">
+      <div id="userEmail" style="margin-bottom:6px;opacity:0.8;word-break:break-all;"></div>
+      <button class="btn" onclick="signOut()" style="width:100%;font-size:11px;background:rgba(255,255,255,0.1);color:#fff;border-color:rgba(255,255,255,0.2);">Sign Out</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- CLIENTS VIEW -->
+    <div id="viewClients">
+      <div class="topbar">
+        <h2>Clients <span id="clientCount" style="font-size:12px;color:#999;font-weight:normal;"></span></h2>
+        <button class="btn btn-green" onclick="showView('new')">+ New Client</button>
+        <button class="btn" onclick="exportCSV()">Export CSV</button>
+      </div>
+      <div class="search-bar">
+        <input id="searchInput" placeholder="Search name, phone, email..." oninput="filterClients()">
+        <select id="filterAgent" onchange="filterClients()">
+          <option value="">All Agents</option>
+          <option>Thomas Jaboro</option>
+        </select>
+        <select id="filterPlan" onchange="filterClients()">
+          <option value="">All Plan Types</option>
+          <option>ACA/Marketplace</option>
+          <option>Medicare</option>
+          <option>Medicaid</option>
+          <option>Short Term</option>
+          <option>Ancillary</option>
+        </select>
+        <select id="filterSpecial" onchange="filterClients()">
+          <option value="">All Clients</option>
+          <option value="turning65">Turning 65 This Year</option>
+          <option value="turning64">Turning 64 This Year</option>
+          <option value="renewal">Renewal This Month</option>
+        </select>
+        <button class="btn" onclick="clearFilters()">Clear</button>
+      </div>
+      <div class="client-list">
+        <table class="client-table" id="clientTable">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>DOB</th>
+              <th>Phone</th>
+              <th>Email</th>
+              <th>Plan Type</th>
+              <th>Plan Name</th>
+              <th>Premium</th>
+              <th>Agent</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="clientTableBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty-state" style="display:none;">
+          <p style="font-size:16px;margin-bottom:8px;">No clients found</p>
+          <p style="font-size:12px;">Add a new client or import from CSV</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLIENT FORM VIEW -->
+    <div id="viewForm" style="display:none;">
+      <div class="topbar">
+        <h2 id="formTitle">New Client</h2>
+        <button class="btn btn-blue" onclick="saveClient()">Save Client</button>
+        <button class="btn" onclick="showView('clients')">Cancel</button>
+        <button class="btn btn-red" id="deleteBtn" onclick="deleteClient()" style="display:none;">Delete</button>
+      </div>
+      <div class="form-wrap active">
+        <div class="form-card">
+
+          <!-- PAGE 1 -->
+          <!-- Demographics -->
+          <div class="form-section">
+            <div class="form-section-title">Demographics</div>
+            <div class="form-grid g5" style="margin-bottom:8px;">
+              <div class="field"><label>First Name</label><input id="f_firstName"></div>
+              <div class="field"><label>Last Name</label><input id="f_lastName"></div>
+              <div class="field"><label>MI</label><input id="f_mi" style="width:50px;"></div>
+              <div class="field"><label>Gender</label>
+                <select id="f_gender"><option></option><option>Male</option><option>Female</option></select>
+              </div>
+              <div class="field"><label>Marital Status</label>
+                <select id="f_marital"><option></option><option>Single</option><option>Married</option><option>Divorced</option><option>Widowed</option></select>
+              </div>
+            </div>
+            <div class="form-grid g5">
+              <div class="field"><label>Date of Birth</label><input id="f_dob" type="date"></div>
+              <div class="field"><label>Age</label><input id="f_age" readonly style="background:#f9f9f9;"></div>
+              <div class="field"><label>Height</label><input id="f_height" placeholder="5'10&quot;"></div>
+              <div class="field"><label>Weight</label><input id="f_weight" placeholder="lbs"></div>
+              <div class="field"><label>Tobacco</label>
+                <select id="f_tobacco"><option></option><option>Yes</option><option>No</option></select>
+              </div>
+            </div>
+          </div>
+
+          <!-- SSN & Mothers Maiden -->
+          <div class="form-section">
+            <div class="form-grid g3">
+              <div class="field"><label>SSN</label><input id="f_ssn" placeholder="XXX-XX-XXXX"></div>
+              <div class="field"><label>Mother's Maiden Name</label><input id="f_mothersMaiden"></div>
+              <div class="field"><label>Total Household Members</label><input id="f_householdMembers" type="number"></div>
+            </div>
+          </div>
+
+          <!-- Contact -->
+          <div class="form-section">
+            <div class="form-section-title">Contact Information</div>
+            <div class="form-grid g4" style="margin-bottom:8px;">
+              <div class="field" style="grid-column:span 2;"><label>Residential Address</label><input id="f_resAddress"></div>
+              <div class="field"><label>City</label><input id="f_resCity"></div>
+              <div class="field"><label>State</label><input id="f_resSt" style="width:60px;"></div>
+            </div>
+            <div class="form-grid g4" style="margin-bottom:8px;">
+              <div class="field"><label>Zip</label><input id="f_resZip"></div>
+              <div class="field"><label>County</label><input id="f_resCounty"></div>
+              <div class="field"><label>Phone</label><input id="f_phone" placeholder="(XXX) XXX-XXXX"></div>
+              <div class="field"><label>Alt Phone</label><input id="f_altPhone"></div>
+            </div>
+            <div class="form-grid g2" style="margin-bottom:8px;">
+              <div class="field"><label>Email</label><input id="f_email" type="email"></div>
+              <div class="field"><label>Email 2</label><input id="f_email2" type="email"></div>
+            </div>
+            <div class="field" style="margin-bottom:8px;">
+              <label><input type="checkbox" id="f_sameAddress" onchange="toggleBillingAddress()"> Billing address same as residential</label>
+            </div>
+            <div id="billingAddressSection">
+              <div class="form-grid g4">
+                <div class="field" style="grid-column:span 2;"><label>Billing Address</label><input id="f_billAddress"></div>
+                <div class="field"><label>City</label><input id="f_billCity"></div>
+                <div class="field"><label>State</label><input id="f_billSt"></div>
+              </div>
+              <div class="form-grid g2" style="margin-top:8px;">
+                <div class="field"><label>Zip</label><input id="f_billZip"></div>
+                <div class="field"><label>County</label><input id="f_billCounty"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Household Members -->
+          <div class="form-section">
+            <div class="form-section-title">Household Members</div>
+            <div id="membersContainer"></div>
+            <button class="btn add-row-btn" onclick="addMemberRow()">+ Add Member</button>
+          </div>
+
+          <!-- Insurance Plan -->
+          <div class="form-section">
+            <div class="form-section-title">Insurance Plan</div>
+            <div class="form-grid g3" style="margin-bottom:8px;">
+              <div class="field" style="grid-column:span 2;"><label>Plan Name</label><input id="f_planName"></div>
+              <div class="field"><label>Plan Type</label>
+                <select id="f_planType">
+                  <option></option>
+                  <option>ACA/Marketplace</option>
+                  <option>Medicare</option>
+                  <option>Medicaid</option>
+                  <option>Short Term</option>
+                  <option>Ancillary</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-grid g4" style="margin-bottom:8px;">
+              <div class="field"><label>Deductible</label><input id="f_deductible"></div>
+              <div class="field"><label>Co/MOOP</label><input id="f_comoop"></div>
+              <div class="field"><label>Type</label><input id="f_type"></div>
+              <div class="field"><label>Level</label>
+                <select id="f_level"><option></option><option>Bronze</option><option>Silver</option><option>Gold</option><option>Platinum</option><option>Catastrophic</option></select>
+              </div>
+            </div>
+            <div class="form-grid g4">
+              <div class="field"><label>Total Premium</label><input id="f_totalPremium" placeholder="$"></div>
+              <div class="field"><label>Subsidy</label><input id="f_subsidy" placeholder="$"></div>
+              <div class="field"><label>Premium (After Subsidy)</label><input id="f_premium" placeholder="$"></div>
+              <div class="field"><label>App Fee</label><input id="f_appFee" placeholder="$"></div>
+            </div>
+          </div>
+
+          <!-- Ancillary Plans -->
+          <div class="form-section">
+            <div class="form-section-title">Ancillary Plans</div>
+            <div class="form-grid g4">
+              <div class="field"><label>Dental Premium</label><input id="f_dentalPremium" placeholder="$"></div>
+              <div class="field"><label>Vision Premium</label><input id="f_visionPremium" placeholder="$"></div>
+              <div class="field"><label>Accident Premium</label><input id="f_accidentPremium" placeholder="$"></div>
+              <div class="field"><label>Critical Illness Premium</label><input id="f_criticalPremium" placeholder="$"></div>
+            </div>
+            <div class="form-grid g2" style="margin-top:8px;">
+              <div class="field"><label>Waive Dental</label>
+                <select id="f_waiveDental"><option></option><option>Yes</option><option>No</option></select>
+              </div>
+              <div class="field"><label>Combo</label><input id="f_combo"></div>
+            </div>
+          </div>
+
+          <!-- Medicare/Medicaid -->
+          <div class="form-section">
+            <div class="form-section-title">Medicare / Medicaid</div>
+            <div class="form-grid g4">
+              <div class="field"><label>Medicare # Part A</label><input id="f_medicareA"></div>
+              <div class="field"><label>Medicare # Part B</label><input id="f_medicareB"></div>
+              <div class="field"><label>Medicaid #</label><input id="f_medicaid"></div>
+            </div>
+          </div>
+
+          <!-- PAGE 2 -->
+          <!-- Payment Dates -->
+          <div class="form-section">
+            <div class="form-section-title">Payment & Effective Dates</div>
+            <div class="form-grid g4" style="margin-bottom:8px;">
+              <div class="field"><label>Health Pay Date</label><input id="f_healthPayDate" type="date"></div>
+              <div class="field"><label>Health Effective</label><input id="f_healthEffective" type="date"></div>
+              <div class="field"><label>Ancil Pay Date</label><input id="f_ancilPayDate" type="date"></div>
+              <div class="field"><label>Ancil Effective</label><input id="f_ancilEffective" type="date"></div>
+            </div>
+            <div class="form-grid g4" style="margin-bottom:8px;">
+              <div class="field"><label>Dental Pay Date</label><input id="f_dentalPayDate" type="date"></div>
+              <div class="field"><label>Dental Effective</label><input id="f_dentalEffective" type="date"></div>
+            </div>
+            <div class="form-grid g4">
+              <div class="field"><label>Total First Month</label><input id="f_totalFirstMonth" placeholder="$"></div>
+              <div class="field"><label>Total Monthly</label><input id="f_totalMonthly" placeholder="$"></div>
+            </div>
+          </div>
+
+          <!-- Income -->
+          <div class="form-section">
+            <div class="form-section-title">Income & Employment</div>
+            <div class="form-grid g3" style="margin-bottom:8px;">
+              <div class="field"><label>Total Income</label><input id="f_totalIncome" placeholder="$"></div>
+            </div>
+            <div class="form-grid g3" style="margin-bottom:8px;">
+              <div class="field" style="grid-column:span 2;"><label>Primary Occupation / Employer</label><input id="f_primaryEmployer"></div>
+              <div class="field"><label>Phone</label><input id="f_primaryEmployerPhone"></div>
+            </div>
+            <div class="form-grid g3" style="margin-bottom:8px;">
+              <div class="field"><label>Primary Income</label><input id="f_primaryIncome" placeholder="$"></div>
+              <div class="field" style="grid-column:span 2;"><label>Spouse Occupation / Employer</label><input id="f_spouseEmployer"></div>
+            </div>
+            <div class="form-grid g3" style="margin-bottom:8px;">
+              <div class="field"><label>Spouse Phone</label><input id="f_spouseEmployerPhone"></div>
+              <div class="field"><label>Spouse Income</label><input id="f_spouseIncome" placeholder="$"></div>
+            </div>
+            <div class="form-grid g3" style="margin-bottom:8px;">
+              <div class="field" style="grid-column:span 2;"><label>Other Income Source 1</label><input id="f_otherIncome1"></div>
+              <div class="field"><label>Amount</label><input id="f_otherIncomeAmt1" placeholder="$"></div>
+            </div>
+            <div class="form-grid g3" style="margin-bottom:8px;">
+              <div class="field" style="grid-column:span 2;"><label>Other Income Source 2</label><input id="f_otherIncome2"></div>
+              <div class="field"><label>Amount</label><input id="f_otherIncomeAmt2" placeholder="$"></div>
+            </div>
+          </div>
+
+          <!-- Doctors -->
+          <div class="form-section">
+            <div class="form-section-title">Doctors</div>
+            <div id="doctorsContainer"></div>
+            <button class="btn add-row-btn" onclick="addDoctorRow()">+ Add Doctor</button>
+          </div>
+
+          <!-- Medications -->
+          <div class="form-section">
+            <div class="form-section-title">Medications</div>
+            <div id="medsContainer"></div>
+            <button class="btn add-row-btn" onclick="addMedRow()">+ Add Medication</button>
+          </div>
+
+          <!-- Payment Info -->
+          <div class="form-section">
+            <div class="form-section-title">Payment Information</div>
+            <div class="form-grid g3" style="margin-bottom:8px;">
+              <div class="field" style="grid-column:span 2;"><label>Name of Financial Institution</label><input id="f_bankName"></div>
+              <div class="field"><label>Account Type</label>
+                <select id="f_accountType"><option></option><option>Checking</option><option>Savings</option></select>
+              </div>
+            </div>
+            <div class="form-grid g3" style="margin-bottom:8px;">
+              <div class="field"><label>Routing Number</label><input id="f_routing"></div>
+              <div class="field"><label>Account Number</label><input id="f_account"></div>
+              <div class="field"><label>Primary Name on Account</label><input id="f_accountName"></div>
+            </div>
+            <div class="form-grid g4">
+              <div class="field"><label>Card Type</label><input id="f_cardType"></div>
+              <div class="field"><label>Card Number</label><input id="f_cardNumber"></div>
+              <div class="field"><label>Exp (MM/YY)</label><input id="f_cardExp"></div>
+              <div class="field"><label>CVV</label><input id="f_cvv"></div>
+            </div>
+          </div>
+
+          <!-- Agent Info -->
+          <div class="form-section">
+            <div class="form-section-title">Agent Information</div>
+            <div class="form-grid g4">
+              <div class="field"><label>Agent</label><input id="f_agent" value="Thomas Jaboro"></div>
+              <div class="field"><label>Submitted By</label><input id="f_submittedBy"></div>
+              <div class="field"><label>Date</label><input id="f_date" type="date"></div>
+              <div class="field"><label>Lead Source</label><input id="f_leadSource"></div>
+            </div>
+          </div>
+
+          <!-- Notes -->
+          <div class="form-section">
+            <div class="form-section-title">Notes</div>
+            <div class="field"><textarea id="f_notes" rows="4" placeholder="Client notes..."></textarea></div>
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-blue" onclick="saveClient()">Save Client</button>
+            <button class="btn" onclick="showView('clients')">Cancel</button>
+            <button class="btn btn-red" id="deleteBtn2" onclick="deleteClient()" style="display:none;">Delete Client</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- IMPORT VIEW -->
+    <div id="viewImport" style="display:none;">
+      <div class="topbar"><h2>Import Clients from CSV</h2></div>
+      <div style="padding:16px;">
+        <div class="import-card">
+          <h3>Step 1 — Upload your CSV file</h3>
+          <p style="font-size:12px;color:#666;margin-bottom:12px;">Export your client data from Adobe Pro or any spreadsheet. The first row should be column headers.</p>
+          <div class="drop-zone" id="dropZone" onclick="document.getElementById('csvFile').click()">
+            Click to select CSV file or drag and drop here
+            <input type="file" id="csvFile" accept=".csv" style="display:none;" onchange="handleCSV(event)">
+          </div>
+          <div id="mappingSection" style="display:none;">
+            <h3 style="margin-bottom:8px;">Step 2 — Map your columns</h3>
+            <p style="font-size:12px;color:#666;margin-bottom:12px;">Match your CSV columns to the CRM fields.</p>
+            <table class="mapping-table" id="mappingTable">
+              <thead><tr><th>CRM Field</th><th>Your CSV Column</th></tr></thead>
+              <tbody id="mappingBody"></tbody>
+            </table>
+            <button class="btn btn-green" onclick="importClients()">Import Clients</button>
+            <span id="importStatus" style="margin-left:10px;font-size:12px;color:#28a745;"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- REPORTS VIEW -->
+    <div id="viewReports" style="display:none;">
+      <div class="topbar"><h2>Reports</h2></div>
+      <div style="padding:16px;">
+        <div class="report-cards" id="reportCards"></div>
+        <div class="report-result" id="reportResult" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 id="reportTitle" style="font-size:14px;"></h3>
+            <button class="btn" onclick="exportReportCSV()">Export CSV</button>
+          </div>
+          <table class="client-table" id="reportTable">
+            <thead id="reportTableHead"></thead>
+            <tbody id="reportTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ---- CONFIG ----
+var SP_CLIENT_ID='1be40fcb-4db4-45b0-8c12-99d945eb78e7';
+var SP_TENANT_ID='12be0d3c-3e63-429f-bf46-1a2f746aa25f';
+var SP_SITE='https://libertybellhealth.sharepoint.com/sites/LibertyCRM';
+var SP_LIST='CRMClients';
+var AZURE_URL='https://nice-moss-053e8c60f.7.azurestaticapps.net';
+var msalInstance=null;
+var spToken=null;
+var clients=[];
+var editingId=null;
+var csvHeaders=[];
+var csvData=[];
+var currentReportData=[];
+
+// ---- MSAL ----
+function initMSAL(){
+  var config={
+    auth:{clientId:SP_CLIENT_ID,authority:'https://login.microsoftonline.com/'+SP_TENANT_ID,redirectUri:AZURE_URL},
+    cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true}
+  };
+  msalInstance=new msal.PublicClientApplication(config);
+  msalInstance.initialize().then(function(){
+    msalInstance.handleRedirectPromise().then(function(resp){
+      if(resp&&resp.accessToken){spToken=resp.accessToken;onSignedIn(resp.account);return;}
+      var accounts=msalInstance.getAllAccounts();
+      if(accounts.length>0){
+        msalInstance.acquireTokenSilent({
+          scopes:['https://libertybellhealth.sharepoint.com/.default'],
+          account:accounts[0],redirectUri:AZURE_URL
+        }).then(function(r){spToken=r.accessToken;onSignedIn(accounts[0]);})
+        .catch(function(){
+          msalInstance.ssoSilent({scopes:['https://libertybellhealth.sharepoint.com/.default'],redirectUri:AZURE_URL})
+          .then(function(r){spToken=r.accessToken;onSignedIn(r.account);})
+          .catch(function(){showAuth();});
+        });
+      } else {
+        msalInstance.ssoSilent({scopes:['https://libertybellhealth.sharepoint.com/.default'],redirectUri:AZURE_URL})
+        .then(function(r){spToken=r.accessToken;onSignedIn(r.account);})
+        .catch(function(){showAuth();});
+      }
+    }).catch(function(){showAuth();});
+  });
+}
+
+function showAuth(){
+  document.getElementById('authScreen').style.display='flex';
+  document.getElementById('mainApp').style.display='none';
+}
+
+function onSignedIn(account){
+  document.getElementById('authScreen').style.display='none';
+  document.getElementById('mainApp').style.display='flex';
+  if(account)document.getElementById('userEmail').textContent=account.username||account.name||'';
+  loadClients();
+  renderReportCards();
+}
+
+function signIn(){
+  msalInstance.loginRedirect({
+    scopes:['https://libertybellhealth.sharepoint.com/.default','offline_access'],
+    redirectUri:AZURE_URL
+  });
+}
+function signOut(){
+  msalInstance.logoutRedirect({redirectUri:AZURE_URL});
+}
+
+// ---- SHAREPOINT ----
+function spHeaders(){
+  return {'Authorization':'Bearer '+spToken,'Accept':'application/json;odata=nometadata','Content-Type':'application/json;odata=nometadata'};
+}
+function spUrl(path){return SP_SITE+"/_api/web/lists/getbytitle('"+SP_LIST+"')"+path;}
+
+function loadClients(){
+  fetch(spUrl("/items?$select=Id,Title,ClientData&$top=2000&$orderby=Title"),{headers:spHeaders()})
+  .then(function(r){return r.json();})
+  .then(function(data){
+    if(!data.value)return;
+    clients=data.value.map(function(item){
+      var c={};
+      try{c=JSON.parse(item.ClientData);}catch(e){}
+      c._id=item.Id;
+      c._title=item.Title;
+      return c;
+    });
+    renderClientTable(clients);
+  }).catch(function(e){console.log('Load error:',e);});
+}
+
+function saveClientSP(clientData,id){
+  var title=(clientData.f_firstName||'')+' '+(clientData.f_lastName||'');
+  var body=JSON.stringify({Title:title.trim()||'Unknown',ClientData:JSON.stringify(clientData)});
+  if(id){
+    return fetch(spUrl("/items("+id+")"),{
+      method:'POST',headers:Object.assign({},spHeaders(),{'IF-MATCH':'*','X-HTTP-Method':'MERGE'}),body:body
+    });
+  } else {
+    return fetch(spUrl("/items"),{method:'POST',headers:spHeaders(),body:body});
+  }
+}
+
+function deleteClientSP(id){
+  return fetch(spUrl("/items("+id+")"),{
+    method:'POST',headers:Object.assign({},spHeaders(),{'IF-MATCH':'*','X-HTTP-Method':'DELETE'})
+  });
+}
+
+// ---- VIEWS ----
+function showView(view){
+  document.getElementById('viewClients').style.display='none';
+  document.getElementById('viewForm').style.display='none';
+  document.getElementById('viewImport').style.display='none';
+  document.getElementById('viewReports').style.display='none';
+  document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active');});
+  if(view==='clients'){
+    document.getElementById('viewClients').style.display='block';
+    document.getElementById('navClients').classList.add('active');
+  } else if(view==='new'){
+    clearForm();
+    editingId=null;
+    document.getElementById('formTitle').textContent='New Client';
+    document.getElementById('deleteBtn').style.display='none';
+    document.getElementById('deleteBtn2').style.display='none';
+    document.getElementById('viewForm').style.display='block';
+    document.getElementById('navNew').classList.add('active');
+    // Set today's date
+    document.getElementById('f_date').value=new Date().toISOString().split('T')[0];
+  } else if(view==='import'){
+    document.getElementById('viewImport').style.display='block';
+    document.getElementById('navImport').classList.add('active');
+  } else if(view==='reports'){
+    document.getElementById('viewReports').style.display='block';
+    document.getElementById('navReports').classList.add('active');
+    renderReportCards();
+  }
+}
+
+// ---- CLIENT TABLE ----
+function renderClientTable(data){
+  var tbody=document.getElementById('clientTableBody');
+  tbody.innerHTML='';
+  document.getElementById('clientCount').textContent='('+data.length+')';
+  if(!data.length){
+    document.getElementById('emptyState').style.display='block';
+    return;
+  }
+  document.getElementById('emptyState').style.display='none';
+  data.forEach(function(c){
+    var tr=document.createElement('tr');
+    var planBadge='';
+    if(c.f_planType){
+      var bc='badge-blue';
+      if(c.f_planType==='Medicare')bc='badge-green';
+      else if(c.f_planType==='Medicaid')bc='badge-orange';
+      else if(c.f_planType==='Short Term')bc='badge-red';
+      planBadge='<span class="badge '+bc+'">'+c.f_planType+'</span>';
+    }
+    tr.innerHTML='<td>'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</td>'+
+      '<td>'+(c.f_dob||'')+'</td>'+
+      '<td>'+(c.f_phone||'')+'</td>'+
+      '<td>'+(c.f_email||'')+'</td>'+
+      '<td>'+planBadge+'</td>'+
+      '<td>'+(c.f_planName||'')+'</td>'+
+      '<td>'+(c.f_premium?'$'+c.f_premium:'')+'</td>'+
+      '<td>'+(c.f_agent||'')+'</td>'+
+      '<td><button class="btn" style="padding:3px 8px;font-size:11px;" onclick="editClient(\''+c._id+'\')">Edit</button></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function filterClients(){
+  var q=document.getElementById('searchInput').value.toLowerCase();
+  var agent=document.getElementById('filterAgent').value;
+  var plan=document.getElementById('filterPlan').value;
+  var special=document.getElementById('filterSpecial').value;
+  var thisYear=new Date().getFullYear();
+  var filtered=clients.filter(function(c){
+    var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).toLowerCase();
+    var phone=(c.f_phone||'').toLowerCase();
+    var email=(c.f_email||'').toLowerCase();
+    if(q&&!name.includes(q)&&!phone.includes(q)&&!email.includes(q))return false;
+    if(agent&&c.f_agent!==agent)return false;
+    if(plan&&c.f_planType!==plan)return false;
+    if(special==='turning65'){
+      if(!c.f_dob)return false;
+      var age=thisYear-parseInt(c.f_dob.split('-')[0]);
+      if(age!==64&&age!==65)return false;
+    }
+    if(special==='turning64'){
+      if(!c.f_dob)return false;
+      var age2=thisYear-parseInt(c.f_dob.split('-')[0]);
+      if(age2!==63&&age2!==64)return false;
+    }
+    return true;
+  });
+  renderClientTable(filtered);
+}
+
+function clearFilters(){
+  document.getElementById('searchInput').value='';
+  document.getElementById('filterAgent').value='';
+  document.getElementById('filterPlan').value='';
+  document.getElementById('filterSpecial').value='';
+  renderClientTable(clients);
+}
+
+// ---- FORM ----
+var FIELDS=['firstName','lastName','mi','gender','marital','dob','age','height','weight','tobacco',
+  'ssn','mothersMaiden','householdMembers',
+  'resAddress','resCity','resSt','resZip','resCounty','phone','altPhone','email','email2',
+  'billAddress','billCity','billSt','billZip','billCounty',
+  'planName','planType','deductible','comoop','type','level',
+  'totalPremium','subsidy','premium','appFee',
+  'dentalPremium','visionPremium','accidentPremium','criticalPremium','waiveDental','combo',
+  'medicareA','medicareB','medicaid',
+  'healthPayDate','healthEffective','ancilPayDate','ancilEffective','dentalPayDate','dentalEffective',
+  'totalFirstMonth','totalMonthly','totalIncome',
+  'primaryEmployer','primaryEmployerPhone','primaryIncome',
+  'spouseEmployer','spouseEmployerPhone','spouseIncome',
+  'otherIncome1','otherIncomeAmt1','otherIncome2','otherIncomeAmt2',
+  'bankName','accountType','routing','account','accountName',
+  'cardType','cardNumber','cardExp','cvv',
+  'agent','submittedBy','date','leadSource','notes'];
+
+function clearForm(){
+  FIELDS.forEach(function(f){
+    var el=document.getElementById('f_'+f);
+    if(el)el.value='';
+  });
+  document.getElementById('membersContainer').innerHTML='';
+  document.getElementById('doctorsContainer').innerHTML='';
+  document.getElementById('medsContainer').innerHTML='';
+  document.getElementById('f_agent').value='Thomas Jaboro';
+  document.getElementById('f_sameAddress').checked=false;
+  document.getElementById('billingAddressSection').style.display='block';
+  addMemberRow();
+  addDoctorRow();
+  addMedRow();
+}
+
+function getFormData(){
+  var data={};
+  FIELDS.forEach(function(f){
+    var el=document.getElementById('f_'+f);
+    if(el)data['f_'+f]=el.value;
+  });
+  // Members
+  data.members=[];
+  document.querySelectorAll('.member-row-data').forEach(function(row){
+    var m={};
+    row.querySelectorAll('[data-field]').forEach(function(el){m[el.dataset.field]=el.value;});
+    data.members.push(m);
+  });
+  // Doctors
+  data.doctors=[];
+  document.querySelectorAll('.doctor-row-data').forEach(function(row){
+    var d={};
+    row.querySelectorAll('[data-field]').forEach(function(el){d[el.dataset.field]=el.value;});
+    data.doctors.push(d);
+  });
+  // Meds
+  data.meds=[];
+  document.querySelectorAll('.med-row-data').forEach(function(row){
+    var m={};
+    row.querySelectorAll('[data-field]').forEach(function(el){m[el.dataset.field]=el.value;});
+    data.meds.push(m);
+  });
+  return data;
+}
+
+function setFormData(data){
+  FIELDS.forEach(function(f){
+    var el=document.getElementById('f_'+f);
+    if(el&&data['f_'+f]!==undefined)el.value=data['f_'+f];
+  });
+  // Members
+  document.getElementById('membersContainer').innerHTML='';
+  if(data.members&&data.members.length){
+    data.members.forEach(function(m){addMemberRow(m);});
+  } else {addMemberRow();}
+  // Doctors
+  document.getElementById('doctorsContainer').innerHTML='';
+  if(data.doctors&&data.doctors.length){
+    data.doctors.forEach(function(d){addDoctorRow(d);});
+  } else {addDoctorRow();}
+  // Meds
+  document.getElementById('medsContainer').innerHTML='';
+  if(data.meds&&data.meds.length){
+    data.meds.forEach(function(m){addMedRow(m);});
+  } else {addMedRow();}
+}
+
+function editClient(id){
+  var c=clients.find(function(x){return x._id==id;});
+  if(!c)return;
+  editingId=id;
+  clearForm();
+  setFormData(c);
+  document.getElementById('formTitle').textContent=(c.f_firstName||'')+' '+(c.f_lastName||'');
+  document.getElementById('deleteBtn').style.display='inline-block';
+  document.getElementById('deleteBtn2').style.display='inline-block';
+  showView('form_edit');
+  document.getElementById('viewForm').style.display='block';
+}
+
+function saveClient(){
+  var data=getFormData();
+  if(!data.f_firstName&&!data.f_lastName){alert('Please enter at least a first or last name.');return;}
+  data._id=editingId;
+  saveClientSP(data,editingId).then(function(){
+    loadClients();
+    showView('clients');
+    alert('Client saved!');
+  }).catch(function(e){alert('Error saving: '+e);});
+}
+
+function deleteClient(){
+  if(!editingId)return;
+  if(!confirm('Delete this client permanently?'))return;
+  deleteClientSP(editingId).then(function(){
+    loadClients();
+    showView('clients');
+  });
+}
+
+// ---- DOB AUTO AGE ----
+document.addEventListener('change',function(e){
+  if(e.target.id==='f_dob'){
+    var dob=new Date(e.target.value);
+    var age=Math.floor((new Date()-dob)/31557600000);
+    document.getElementById('f_age').value=isNaN(age)?'':age;
+  }
+});
+
+function toggleBillingAddress(){
+  var same=document.getElementById('f_sameAddress').checked;
+  document.getElementById('billingAddressSection').style.display=same?'none':'block';
+}
+
+// ---- DYNAMIC ROWS ----
+function addMemberRow(data){
+  var div=document.createElement('div');
+  div.className='member-row member-row-data';
+  div.innerHTML='<div class="field"><label>First Name</label><input data-field="firstName" value="'+(data&&data.firstName||'')+'"></div>'+
+    '<div class="field"><label>Last Name</label><input data-field="lastName" value="'+(data&&data.lastName||'')+'"></div>'+
+    '<div class="field"><label>Gender</label><select data-field="gender"><option></option><option>M</option><option>F</option></select></div>'+
+    '<div class="field"><label>DOB</label><input data-field="dob" type="date" value="'+(data&&data.dob||'')+'"></div>'+
+    '<div class="field"><label>Age</label><input data-field="age" value="'+(data&&data.age||'')+'"></div>'+
+    '<div class="field"><label>Height</label><input data-field="height" value="'+(data&&data.height||'')+'"></div>'+
+    '<div class="field"><label>Weight</label><input data-field="weight" value="'+(data&&data.weight||'')+'"></div>'+
+    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;" onclick="this.parentNode.remove()">x</button>';
+  if(data&&data.gender){div.querySelector('[data-field="gender"]').value=data.gender;}
+  document.getElementById('membersContainer').appendChild(div);
+}
+
+function addDoctorRow(data){
+  var div=document.createElement('div');
+  div.className='doc-row doctor-row-data';
+  div.innerHTML='<div class="field"><label>Doctor Name</label><input data-field="name" value="'+(data&&data.name||'')+'"></div>'+
+    '<div class="field"><label>Specialty / Phone</label><input data-field="specialty" value="'+(data&&data.specialty||'')+'"></div>'+
+    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;" onclick="this.parentNode.remove()">x</button>';
+  document.getElementById('doctorsContainer').appendChild(div);
+}
+
+function addMedRow(data){
+  var div=document.createElement('div');
+  div.className='med-row med-row-data';
+  div.innerHTML='<div class="field"><label>Medication Name</label><input data-field="name" value="'+(data&&data.name||'')+'"></div>'+
+    '<div class="field"><label>Mg</label><input data-field="mg" value="'+(data&&data.mg||'')+'"></div>'+
+    '<div class="field"><label>Frequency</label><input data-field="frequency" value="'+(data&&data.frequency||'')+'"></div>'+
+    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;" onclick="this.parentNode.remove()">x</button>';
+  document.getElementById('medsContainer').appendChild(div);
+}
+
+// ---- CSV IMPORT ----
+function handleCSV(event){
+  var file=event.target.files[0];
+  if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var lines=e.target.result.split('\n').filter(function(l){return l.trim();});
+    csvHeaders=lines[0].split(',').map(function(h){return h.trim().replace(/"/g,'');});
+    csvData=lines.slice(1).map(function(line){
+      var vals=line.split(',').map(function(v){return v.trim().replace(/"/g,'');});
+      var obj={};
+      csvHeaders.forEach(function(h,i){obj[h]=vals[i]||'';});
+      return obj;
+    });
+    renderMapping();
+    document.getElementById('mappingSection').style.display='block';
+  };
+  reader.readAsText(file);
+}
+
+var CRM_FIELDS=[
+  {key:'f_firstName',label:'First Name'},{key:'f_lastName',label:'Last Name'},
+  {key:'f_dob',label:'Date of Birth'},{key:'f_gender',label:'Gender'},
+  {key:'f_ssn',label:'SSN'},{key:'f_phone',label:'Phone'},
+  {key:'f_email',label:'Email'},{key:'f_resAddress',label:'Address'},
+  {key:'f_resCity',label:'City'},{key:'f_resSt',label:'State'},
+  {key:'f_resZip',label:'Zip'},{key:'f_planName',label:'Plan Name'},
+  {key:'f_planType',label:'Plan Type'},{key:'f_premium',label:'Premium'},
+  {key:'f_subsidy',label:'Subsidy'},{key:'f_totalPremium',label:'Total Premium'},
+  {key:'f_agent',label:'Agent'},{key:'f_leadSource',label:'Lead Source'},
+  {key:'f_medicareA',label:'Medicare Part A'},{key:'f_medicareB',label:'Medicare Part B'},
+  {key:'f_medicaid',label:'Medicaid #'},{key:'f_notes',label:'Notes'}
+];
+
+function renderMapping(){
+  var tbody=document.getElementById('mappingBody');
+  tbody.innerHTML='';
+  CRM_FIELDS.forEach(function(f){
+    var tr=document.createElement('tr');
+    var opts='<option value="">-- Skip --</option>'+csvHeaders.map(function(h){
+      var sel=h.toLowerCase().includes(f.label.toLowerCase().split(' ')[0])?'selected':'';
+      return '<option value="'+h+'" '+sel+'>'+h+'</option>';
+    }).join('');
+    tr.innerHTML='<td>'+f.label+'</td><td><select id="map_'+f.key+'">'+opts+'</select></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function importClients(){
+  var imported=0;
+  var promises=csvData.map(function(row){
+    var data={};
+    CRM_FIELDS.forEach(function(f){
+      var col=document.getElementById('map_'+f.key);
+      if(col&&col.value&&row[col.value]!==undefined){
+        data[f.key]=row[col.value];
+      }
+    });
+    data.f_agent=data.f_agent||'Thomas Jaboro';
+    return saveClientSP(data,null).then(function(){imported++;});
+  });
+  Promise.all(promises).then(function(){
+    document.getElementById('importStatus').textContent='Imported '+imported+' clients successfully!';
+    loadClients();
+  }).catch(function(e){
+    document.getElementById('importStatus').textContent='Error during import: '+e;
+  });
+}
+
+// ---- REPORTS ----
+function renderReportCards(){
+  var thisYear=new Date().getFullYear();
+  var turning65=clients.filter(function(c){
+    if(!c.f_dob)return false;
+    var age=thisYear-parseInt(c.f_dob.split('-')[0]);
+    return age===64||age===65;
+  }).length;
+  var medicare=clients.filter(function(c){return c.f_planType==='Medicare';}).length;
+  var aca=clients.filter(function(c){return c.f_planType==='ACA/Marketplace';}).length;
+  var totalPremium=clients.reduce(function(sum,c){return sum+(parseFloat(c.f_premium)||0);},0);
+
+  var cards=[
+    {num:clients.length,label:'Total Clients',filter:'all'},
+    {num:turning65,label:'Turning 65 This Year',filter:'turning65'},
+    {num:aca,label:'ACA/Marketplace Clients',filter:'aca'},
+    {num:medicare,label:'Medicare Clients',filter:'medicare'},
+    {num:'$'+totalPremium.toFixed(0),label:'Total Monthly Premium',filter:'premium'},
+  ];
+  var container=document.getElementById('reportCards');
+  container.innerHTML='';
+  cards.forEach(function(card){
+    var div=document.createElement('div');
+    div.className='report-card';
+    div.innerHTML='<div class="num">'+card.num+'</div><div class="lbl">'+card.label+'</div>';
+    div.addEventListener('click',function(){runReport(card.filter,card.label);});
+    container.appendChild(div);
+  });
+}
+
+function runReport(filter,title){
+  var thisYear=new Date().getFullYear();
+  var data=clients;
+  if(filter==='turning65'){
+    data=clients.filter(function(c){
+      if(!c.f_dob)return false;
+      var age=thisYear-parseInt(c.f_dob.split('-')[0]);
+      return age===64||age===65;
+    });
+  } else if(filter==='aca'){
+    data=clients.filter(function(c){return c.f_planType==='ACA/Marketplace';});
+  } else if(filter==='medicare'){
+    data=clients.filter(function(c){return c.f_planType==='Medicare';});
+  }
+  currentReportData=data;
+  document.getElementById('reportTitle').textContent=title+' ('+data.length+')';
+  var thead=document.getElementById('reportTableHead');
+  var tbody=document.getElementById('reportTableBody');
+  thead.innerHTML='<tr><th>Name</th><th>DOB</th><th>Phone</th><th>Email</th><th>Plan</th><th>Premium</th><th>Agent</th></tr>';
+  tbody.innerHTML='';
+  data.forEach(function(c){
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</td>'+
+      '<td>'+(c.f_dob||'')+'</td>'+
+      '<td>'+(c.f_phone||'')+'</td>'+
+      '<td>'+(c.f_email||'')+'</td>'+
+      '<td>'+(c.f_planType||'')+'</td>'+
+      '<td>'+(c.f_premium?'$'+c.f_premium:'')+'</td>'+
+      '<td>'+(c.f_agent||'')+'</td>';
+    tbody.appendChild(tr);
+  });
+  document.getElementById('reportResult').style.display='block';
+}
+
+function exportReportCSV(){
+  var rows=[['Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Agent']];
+  currentReportData.forEach(function(c){
+    rows.push([(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_agent||'']);
+  });
+  var csv=rows.map(function(r){return r.map(function(v){return '"'+v+'"';}).join(',');}).join('\n');
+  var blob=new Blob([csv],{type:'text/csv'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download='report.csv';a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV(){
+  var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Subsidy','Agent','Lead Source']];
+  clients.forEach(function(c){
+    rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_subsidy||'',c.f_agent||'',c.f_leadSource||'']);
+  });
+  var csv=rows.map(function(r){return r.map(function(v){return '"'+v+'"';}).join(',');}).join('\n');
+  var blob=new Blob([csv],{type:'text/csv'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download='clients.csv';a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ---- INIT ----
+try{initMSAL();}catch(e){console.log('MSAL error:',e);showAuth();}
+</script>
+</body>
+</html>
