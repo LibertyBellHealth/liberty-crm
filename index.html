@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Liberty Bell Health — CRM</title>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
@@ -133,7 +134,7 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
         <h2>Clients <span id="clientCount" style="font-size:12px;color:#999;font-weight:normal;"></span></h2>
         <button class="btn btn-green" onclick="showView('new')">+ New Client</button>
         <button class="btn btn-red" id="bulkDeleteBtn" onclick="bulkDelete()" style="display:none;">Delete Selected</button>
-        <button class="btn" onclick="exportCSV()">Export CSV</button>
+        <button class="btn" onclick="exportExcel()">&#128202; Export Excel</button>
       </div>
       <div class="search-bar">
         <input id="searchInput" placeholder="Search name, phone, email..." oninput="filterClients()">
@@ -505,7 +506,7 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
         <div class="report-result" id="reportResult" style="display:none;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
             <h3 id="reportTitle" style="font-size:14px;"></h3>
-            <button class="btn" onclick="exportReportCSV()">Export CSV</button>
+            <button class="btn" onclick="exportReportExcel()">&#128202; Export Excel</button>
           </div>
           <table class="client-table"><thead id="reportTableHead"></thead><tbody id="reportTableBody"></tbody></table>
         </div>
@@ -608,7 +609,7 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
             </div>
             
             <button class="btn btn-blue" onclick="generateCustomReport()">Generate Report</button>
-            <button class="btn" onclick="exportCustomReport()">Export to CSV</button>
+            <button class="btn" onclick="exportCustomReport()">&#128202; Export to Excel</button>
           </div>
           <div class="form-section" id="customReportResults" style="display:none;">
             <div class="form-section-title">Report Results (<span id="customReportCount">0</span> records)</div>
@@ -655,7 +656,7 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
         <h2>Advanced Search</h2>
         <button class="btn btn-blue" onclick="runAdvSearch()">&#128269; Search</button>
         <button class="btn" onclick="clearAdvSearch()">Clear</button>
-        <button class="btn" onclick="exportAdvSearchCSV()" id="advSearchExportBtn" style="display:none;">Export CSV</button>
+        <button class="btn" onclick="exportAdvSearchExcel()" id="advSearchExportBtn" style="display:none;">&#128202; Export Excel</button>
       </div>
       <div style="padding:16px;">
         <div class="form-card">
@@ -726,7 +727,7 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
             <div id="advSearchResults" style="display:none;">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                 <strong id="advSearchCount" style="color:#1a3a5c;font-size:13px;"></strong>
-                <button class="btn" onclick="exportAdvSearchCSV()">Export CSV</button>
+                <button class="btn" onclick="exportAdvSearchExcel()">&#128202; Export Excel</button>
               </div>
               <div style="overflow-x:auto;">
                 <table class="client-table" id="advSearchTable">
@@ -871,7 +872,7 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
             <div class="form-section-title">&#128465; Data Management</div>
             <p style="font-size:11px;color:#666;margin-bottom:12px;">Export a full backup of all client data, or clear local preview data.</p>
             <div style="display:flex;gap:10px;flex-wrap:wrap;">
-              <button class="btn btn-blue" onclick="exportFullBackup()">&#8595; Export Full Backup (CSV)</button>
+              <button class="btn btn-blue" onclick="exportFullBackup()">&#8595; Export Full Backup (Excel)</button>
               <button class="btn btn-red" onclick="clearPreviewData()">Clear Preview Mode Data</button>
             </div>
           </div>
@@ -1215,6 +1216,16 @@ function editClient(id){
   document.getElementById('deleteBtn').style.display='inline-block';
   document.getElementById('deleteBtn2').style.display='inline-block';
   showView('form_edit');
+  // Inject document upload section
+  var formCard=document.querySelector('#viewForm .form-card');
+  var existing=document.getElementById('clientDocsSection');
+  if(existing)existing.remove();
+  var docSec=document.createElement('div');
+  docSec.className='form-section';
+  docSec.id='clientDocsSection';
+  var actions=formCard.querySelector('.form-actions');
+  formCard.insertBefore(docSec,actions);
+  loadClientDocs(id);
 }
 function saveClient(){
   var data=getFormData();
@@ -1450,17 +1461,22 @@ function runReport(filter,title){
   data.forEach(function(c){var tr=document.createElement('tr');tr.innerHTML='<td>'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</td><td>'+(c.f_dob||'')+'</td><td>'+(c.f_phone||'')+'</td><td>'+(c.f_email||'')+'</td><td>'+(c.f_planType||'')+'</td><td>'+(c.f_premium?'$'+c.f_premium:'')+'</td><td>'+(c.f_agent||'')+'</td>';tbody.appendChild(tr);});
   document.getElementById('reportResult').style.display='block';
 }
-function exportReportCSV(){
+function exportReportExcel(){
   var rows=[['Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Agent']];
   currentReportData.forEach(function(c){rows.push([(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_agent||'']);});
-  dlCSV(rows,'report.csv');
+  dlXLSX(rows,'report.xlsx');
 }
-function exportCSV(){
+function exportExcel(){
   var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Subsidy','Agent','Lead Source','Renewed']];
   clients.forEach(function(c){rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_subsidy||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'']);});
-  dlCSV(rows,'clients.csv');
+  dlXLSX(rows,'clients.xlsx');
 }
-function dlCSV(rows,name){var csv=rows.map(function(r){return r.map(function(v){return '"'+(v||'')+'"';}).join(',');}).join('\n');var blob=new Blob([csv],{type:'text/csv'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);}
+function dlXLSX(rows,filename){
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Data');
+  XLSX.writeFile(wb,filename);
+}
 
 var CRM_IMPORT_FIELDS=[
   {key:'f_firstName',label:'First Name'},{key:'f_lastName',label:'Last Name'},
@@ -1757,7 +1773,7 @@ function exportCustomReport(){
     rows.push(row);
   });
   
-  dlCSV(rows,'custom_report.csv');
+  dlXLSX(rows,'custom_report.xlsx');
 }
 
 // ===================== HEIGHT FORMATTER =====================
@@ -2005,13 +2021,73 @@ function exportFullBackup(){
   clients.forEach(function(c){
     rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_planCarrier||'',c.f_premium||'',c.f_subsidy||'',c.f_totalMonthly||'',c.f_appFee||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'',c.f_resSt||'',c.f_resCity||'',c.f_resZip||'',c.f_resCounty||'',c.f_hasMedicare?'Yes':'No',c.f_hasMedicaid?'Yes':'No',c.f_notes||'',c.f_date||'']);
   });
-  dlCSV(rows,'liberty_crm_backup_'+new Date().toISOString().split('T')[0]+'.csv');
+  dlXLSX(rows,'liberty_crm_backup_'+new Date().toISOString().split('T')[0]+'.xlsx');
 }
 function clearPreviewData(){
   if(!confirm('This will permanently delete all client data saved in Preview Mode. Are you sure?'))return;
   localStorage.removeItem('crm_preview');
   clients=[];renderClientTable(clients);renderReportCards();
   alert('Preview data cleared.');
+}
+
+// ===================== DOCUMENT UPLOAD =====================
+var _clientDocs=[];
+function loadClientDocs(clientId){
+  var sec=document.getElementById('clientDocsSection');
+  if(!sec)return;
+  sec.innerHTML='<div class="form-section-title">&#128196; Client Documents</div><p style="font-size:11px;color:#999;">Loading...</p>';
+  fetch(API_BASE+'/documents?clientType=health&clientId='+clientId,{headers:apiHeaders()})
+  .then(function(r){return r.json();})
+  .then(function(docs){_clientDocs=docs||[];renderClientDocs(clientId,docs);})
+  .catch(function(){_clientDocs=[];renderClientDocs(clientId,[]);});
+}
+function renderClientDocs(clientId,docs){
+  var sec=document.getElementById('clientDocsSection');if(!sec)return;
+  sec.innerHTML='<div class="form-section-title">&#128196; Client Documents <span style="font-size:10px;font-weight:normal;color:#999;">(SSN card, driver\'s license, etc.)</span></div>';
+  if(docs&&docs.length){
+    var ul=document.createElement('div');ul.style.cssText='margin-bottom:10px;';
+    docs.forEach(function(d){
+      var row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:12px;';
+      var ext=(d.name||'').split('.').pop().toLowerCase();
+      var icon=(['jpg','jpeg','png','gif','webp'].indexOf(ext)>=0)?'&#128247;':(['pdf'].indexOf(ext)>=0)?'&#128196;':'&#128196;';
+      var kb=d.size?Math.round(d.size/1024)+'KB':'';
+      row.innerHTML=icon+' <a href="'+d.url+'" target="_blank" style="flex:1;color:#1a3a5c;text-decoration:none;word-break:break-all;">'+d.name+'</a>'+
+        '<span style="color:#999;font-size:10px;">'+kb+'</span>'+
+        '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="deleteClientDoc(\''+clientId+'\',\''+encodeURIComponent(d.name)+'\')">✕</button>';
+      ul.appendChild(row);
+    });
+    sec.appendChild(ul);
+  } else {
+    var emp=document.createElement('p');emp.style.cssText='font-size:11px;color:#999;margin-bottom:8px;';emp.textContent='No documents uploaded yet.';sec.appendChild(emp);
+  }
+  var upRow=document.createElement('div');upRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;';
+  upRow.innerHTML='<input type="file" id="docFileInput" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" style="font-size:11px;flex:1;min-width:0;" onchange="uploadClientDoc(\''+clientId+'\')" multiple>'+
+    '<span id="docUploadStatus" style="font-size:11px;color:#666;"></span>';
+  sec.appendChild(upRow);
+}
+function uploadClientDoc(clientId){
+  var input=document.getElementById('docFileInput');
+  if(!input||!input.files||!input.files.length)return;
+  var status=document.getElementById('docUploadStatus');
+  var files=Array.from(input.files);
+  status.textContent='Uploading '+files.length+' file(s)...';
+  var promises=files.map(function(file){
+    var fd=new FormData();
+    fd.append('file',file);
+    fd.append('clientType','health');
+    fd.append('clientId',clientId);
+    return fetch(API_BASE+'/documents',{method:'POST',headers:{'x-api-key':API_KEY},body:fd});
+  });
+  Promise.all(promises)
+  .then(function(){status.textContent='';input.value='';loadClientDocs(clientId);})
+  .catch(function(e){status.textContent='Upload failed: '+e;});
+}
+function deleteClientDoc(clientId,encodedName){
+  if(!confirm('Delete this document?'))return;
+  fetch(API_BASE+'/documents?clientType=health&clientId='+clientId+'&name='+encodedName,{method:'DELETE',headers:apiHeaders()})
+  .then(function(){loadClientDocs(clientId);})
+  .catch(function(e){alert('Delete failed: '+e);});
 }
 
 // initMSAL called below
@@ -2080,14 +2156,14 @@ function clearAdvSearch(){
   document.getElementById('advSearchExportBtn').style.display='none';
   _advSearchResults=[];
 }
-function exportAdvSearchCSV(){
+function exportAdvSearchExcel(){
   if(!_advSearchResults.length)return;
   var rows=[['Name','DOB','Age','Phone','Email','Plan Type','Carrier','Premium','Agent','State','County','ZIP','Renewed','Lead Source','App Date']];
   _advSearchResults.forEach(function(c){
     var age=calcClientAge(c);
     rows.push([(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_dob||'',age||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planCarrier||'',c.f_premium||'',c.f_agent||'',c.f_resSt||'',c.f_resCounty||'',c.f_resZip||'',c.f_renewed||'',c.f_leadSource||'',c.f_date||'']);
   });
-  dlCSV(rows,'advanced_search_results.csv');
+  dlXLSX(rows,'advanced_search_results.xlsx');
 }
 
 // ===================== TO-DO LIST =====================
