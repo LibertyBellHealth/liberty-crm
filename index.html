@@ -74,6 +74,13 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
 .addr-autocomplete-list div:hover{background:#e8f0f7;}
 .addr-autocomplete-list .addr-main{font-weight:600;color:#222;}
 .addr-autocomplete-list .addr-sub{font-size:10px;color:#666;margin-top:1px;}
+/* ── Toast notifications ── */
+#toastContainer{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
+.toast{padding:11px 18px;border-radius:7px;font-size:13px;font-weight:500;color:#fff;box-shadow:0 4px 14px rgba(0,0,0,0.18);opacity:0;transform:translateY(10px);transition:opacity .25s,transform .25s;pointer-events:none;max-width:320px;}
+.toast.show{opacity:1;transform:translateY(0);}
+.toast.success{background:#16a34a;}
+.toast.error{background:#dc2626;}
+.toast.info{background:#1a3a5c;}
 .import-card{background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;}
 .drop-zone{border:2px dashed #ccc;border-radius:6px;padding:30px;text-align:center;color:#999;cursor:pointer;margin-bottom:12px;}
 .drop-zone:hover{border-color:#1a3a5c;}
@@ -97,6 +104,7 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
 </style>
 </head>
 <body>
+<div id="toastContainer"></div>
 
 <div id="authScreen" class="auth-screen">
   <div class="auth-box">
@@ -885,6 +893,17 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f4f6f9;color:#222;}
 
 <script>
 // ── CONFIGURATION ─────────────────────────────────────────────
+function toast(msg, type, duration){
+  type = type || 'success'; duration = duration || 3000;
+  var c = document.getElementById('toastContainer');
+  var t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  c.appendChild(t);
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){ t.classList.add('show'); }); });
+  setTimeout(function(){ t.classList.remove('show'); setTimeout(function(){ if(t.parentNode)t.parentNode.removeChild(t); }, 300); }, duration);
+}
+
 var API_BASE = 'https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net/api';
 var API_KEY  = '1a5e03ed7170ce0b3443cf3662715f3025c432ebca8e3ec9f9d10652aa065485';
 var SP_CLIENT_ID = '63828fd5-e676-4dd7-bfaa-0055fdb9b3c7';
@@ -1064,7 +1083,7 @@ function showView(v){
 }
 
 function startNewApp(type){
-  if(type==='life'){alert('Life App coming soon!');return;}
+  if(type==='life'){toast('Life App coming soon!','info');return;}
   try{clearForm();}catch(e){console.log('clearForm error:',e);}
   editingId=null;
   try{addDoctorRow();}catch(e){}
@@ -1206,7 +1225,7 @@ function setFormData(data){
 }
 function editClient(id){
   var c=clients.find(function(x){return String(x._id)===String(id);});
-  if(!c){alert('Could not find client record. Please refresh and try again.');return;}
+  if(!c){toast('Could not find client record. Please refresh and try again.','error');return;}
   trackRecentRecord(id,c);
   editingId=id;
   try{clearForm();}catch(e){console.log('clearForm err:',e);}
@@ -1229,8 +1248,8 @@ function editClient(id){
 }
 function saveClient(){
   var data=getFormData();
-  if(!data.f_firstName&&!data.f_lastName){alert('Please enter at least a first or last name.');return;}
-  saveClientAPI(data,editingId).then(function(){loadClients();showView('clients');alert('Client saved!');}).catch(function(e){alert('Error: '+e);});
+  if(!data.f_firstName&&!data.f_lastName){toast('Please enter at least a first or last name.','error');return;}
+  saveClientAPI(data,editingId).then(function(){loadClients();showView('clients');toast('Client saved!','success');}).catch(function(e){toast('Error: '+e,'error');});
 }
 function deleteClient(){
   if(!editingId)return;if(!confirm('Delete this client?'))return;
@@ -1379,8 +1398,8 @@ function saveMedFromRow(btn){
   var row=btn.closest('.med-row-data');
   var nameEl=row.querySelector('[data-field="name"]');
   var name=(nameEl&&nameEl.value||'').trim();
-  if(!name){alert('Please enter a medication name first.');return;}
-  if(MED_LIST.indexOf(name)!==-1||_customMeds.indexOf(name)!==-1){alert('"'+name+'" is already in your medication list!');return;}
+  if(!name){toast('Please enter a medication name first.','error');return;}
+  if(MED_LIST.indexOf(name)!==-1||_customMeds.indexOf(name)!==-1){toast('"'+name+'" is already in your medication list!','info');return;}
   saveCustomMed(name);
   btn.textContent='✓ Saved!';btn.style.background='#d1fae5';btn.disabled=true;
   setTimeout(function(){btn.textContent='+ Save Med';btn.style.background='#e8f4ec';btn.disabled=false;},2000);
@@ -1411,7 +1430,7 @@ function emailAC(el){
 
 function addAncilRow(data){
   var type=data?data.type:document.getElementById('ancilTypeSelect').value;
-  if(!type){alert('Please select a plan type first.');return;}
+  if(!type){toast('Please select a plan type first.','error');return;}
   document.getElementById('ancilTypeSelect').value='';
   var div=document.createElement('div');div.className='ancil-row-data';
   div.style.cssText='display:grid;grid-template-columns:0.7fr 1.5fr 0.7fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
@@ -1682,7 +1701,7 @@ function generateCustomReport(){
 }
 
 function exportCustomReport(){
-  if(!customReportData||customReportData.length===0){alert('Generate a report first.');return;}
+  if(!customReportData||customReportData.length===0){toast('Generate a report first.','error');return;}
   
   var fields=[];
   var fieldLabels={
@@ -1997,7 +2016,7 @@ function saveDefaultAgent(){
 }
 function addPlanTypeSetting(){
   var v=document.getElementById('newPlanTypeInput').value.trim();if(!v)return;
-  if(_settingsPlanTypes.indexOf(v)!==-1){alert('Already exists.');return;}
+  if(_settingsPlanTypes.indexOf(v)!==-1){toast('Already exists.','info');return;}
   _settingsPlanTypes.push(v);localStorage.setItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));
   document.getElementById('newPlanTypeInput').value='';renderSettings();
 }
@@ -2007,7 +2026,7 @@ function removePlanTypeSetting(i){
 }
 function addProjectCodeSetting(){
   var v=document.getElementById('newProjectCodeInput').value.trim();if(!v)return;
-  if(_settingsProjectCodes.indexOf(v)!==-1){alert('Already exists.');return;}
+  if(_settingsProjectCodes.indexOf(v)!==-1){toast('Already exists.','info');return;}
   _settingsProjectCodes.push(v);localStorage.setItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));
   document.getElementById('newProjectCodeInput').value='';renderSettings();
 }
@@ -2016,7 +2035,7 @@ function removeProjectCodeSetting(i){
   _settingsProjectCodes.splice(i,1);localStorage.setItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
 }
 function exportFullBackup(){
-  if(!clients.length){alert('No clients to export.');return;}
+  if(!clients.length){toast('No clients to export.','error');return;}
   var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Carrier','Premium','Subsidy','Total Monthly','App Fee','Agent','Lead Source','Renewed','State','City','ZIP','County','Medicare','Medicaid','Notes','App Date']];
   clients.forEach(function(c){
     rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_planCarrier||'',c.f_premium||'',c.f_subsidy||'',c.f_totalMonthly||'',c.f_appFee||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'',c.f_resSt||'',c.f_resCity||'',c.f_resZip||'',c.f_resCounty||'',c.f_hasMedicare?'Yes':'No',c.f_hasMedicaid?'Yes':'No',c.f_notes||'',c.f_date||'']);
@@ -2027,7 +2046,7 @@ function clearPreviewData(){
   if(!confirm('This will permanently delete all client data saved in Preview Mode. Are you sure?'))return;
   localStorage.removeItem('crm_preview');
   clients=[];renderClientTable(clients);renderReportCards();
-  alert('Preview data cleared.');
+  toast('Preview data cleared.','info');
 }
 
 // ===================== DOCUMENT UPLOAD =====================
@@ -2087,7 +2106,7 @@ function deleteClientDoc(clientId,encodedName){
   if(!confirm('Delete this document?'))return;
   fetch(API_BASE+'/documents?clientType=health&clientId='+clientId+'&name='+encodedName,{method:'DELETE',headers:apiHeaders()})
   .then(function(){loadClientDocs(clientId);})
-  .catch(function(e){alert('Delete failed: '+e);});
+  .catch(function(e){toast('Delete failed: '+e,'error');});
 }
 
 // initMSAL called below
@@ -2344,15 +2363,15 @@ function renderSettings(){
   var nameEl=document.getElementById('settingsCrmName');
   if(nameEl)nameEl.value=localStorage.getItem('crm_display_name')||'Liberty Bell Health';
 }
-function addAgentSetting(){var v=document.getElementById('newAgentInput').value.trim();if(!v)return;if(_settingsAgents.indexOf(v)!==-1){alert('Agent already exists.');return;}_settingsAgents.push(v);document.getElementById('newAgentInput').value='';saveSettings();renderSettings();populateDefaultAgentSelect();}
+function addAgentSetting(){var v=document.getElementById('newAgentInput').value.trim();if(!v)return;if(_settingsAgents.indexOf(v)!==-1){toast('Agent already exists.','info');return;}_settingsAgents.push(v);document.getElementById('newAgentInput').value='';saveSettings();renderSettings();populateDefaultAgentSelect();}
 function removeAgentSetting(i){if(!confirm('Remove this agent?'))return;_settingsAgents.splice(i,1);saveSettings();renderSettings();populateDefaultAgentSelect();}
-function addLeadSourceSetting(){var v=document.getElementById('newLeadSourceInput').value.trim();if(!v)return;if(_settingsLeadSources.indexOf(v)!==-1){alert('Lead source already exists.');return;}_settingsLeadSources.push(v);document.getElementById('newLeadSourceInput').value='';saveSettings();renderSettings();}
+function addLeadSourceSetting(){var v=document.getElementById('newLeadSourceInput').value.trim();if(!v)return;if(_settingsLeadSources.indexOf(v)!==-1){toast('Lead source already exists.','info');return;}_settingsLeadSources.push(v);document.getElementById('newLeadSourceInput').value='';saveSettings();renderSettings();}
 function removeLeadSourceSetting(i){if(!confirm('Remove this lead source?'))return;_settingsLeadSources.splice(i,1);saveSettings();renderSettings();}
 function addCustomMedSetting(){var v=document.getElementById('newCustomMedInput').value.trim();if(!v)return;saveCustomMed(v);document.getElementById('newCustomMedInput').value='';renderSettings();}
 function removeCustomMedSetting(i){if(!confirm('Remove this medication?'))return;_customMeds.splice(i,1);localStorage.setItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();}
-function addRenewalSetting(){var v=document.getElementById('newRenewalInput').value.trim();if(!v)return;if(_settingsRenewals.indexOf(v)!==-1){alert('Already exists.');return;}_settingsRenewals.push(v);document.getElementById('newRenewalInput').value='';saveSettings();renderSettings();}
+function addRenewalSetting(){var v=document.getElementById('newRenewalInput').value.trim();if(!v)return;if(_settingsRenewals.indexOf(v)!==-1){toast('Already exists.','info');return;}_settingsRenewals.push(v);document.getElementById('newRenewalInput').value='';saveSettings();renderSettings();}
 function removeRenewalSetting(i){if(!confirm('Remove this renewal option?'))return;_settingsRenewals.splice(i,1);saveSettings();renderSettings();}
-function saveCrmName(){var v=document.getElementById('settingsCrmName').value.trim();if(!v)return;localStorage.setItem('crm_display_name',v);document.querySelector('.sidebar .logo').childNodes[0].textContent=v;alert('CRM name updated!');}
+function saveCrmName(){var v=document.getElementById('settingsCrmName').value.trim();if(!v)return;localStorage.setItem('crm_display_name',v);document.querySelector('.sidebar .logo').childNodes[0].textContent=v;toast('CRM name updated!','success');}
 
 try{initMSAL();loadCarriers();loadSettingsExtras();applySettingsToDropdowns();}catch(e){console.log('MSAL error:',e);showAuthScreen();}
 </script>
