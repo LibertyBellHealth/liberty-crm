@@ -7,7 +7,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script type="text/javascript">
-!function(T,l,y){var S=T.location,k="script",D="instrumentationKey",C="ingestionendpoint",I="disableExceptionTracking",E="ai.device.",b="toLowerCase",w="crossOriginAttribute",N="appendChild",o="createElement",t="getItem",c="setItem",s="XMLHttpRequest",i="send",e="GET",p="fetch",a="ajaxDisableCors",m="XMLHttpRequestWrapper",h=this,f="version",r=l.getElementsByTagName(k)[0],P=function(a){var e=l.createElement(k);return e.type="text/javascript",e.src=a,e},q=function(){return{config:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f",endpointUrl:"https://centralus-2.in.applicationinsights.azure.com/v2/track",disableAjaxTracking:false,disableFetchTracking:false,enableAutoRouteTracking:false}}},j=window.appInsights||q();window.appInsights=j;var u=l.createElement(k);u.src="https://az416426.vo.msecnd.net/scripts/b/ai.2.min.js",r?r.parentNode.insertBefore(u,r):l.head.appendChild(u);}(window,document);
+!function(T,l,y){var S=T.location,k="script",D="instrumentationKey",C="ingestionendpoint",I="disableExceptionTracking",E="ai.device.",b="toLowerCase",w="crossOriginFailed",N="hi.device.",O="name",L="path",P="user",q="id",H="url",B="ingestionendpoint",F=function(e){var a=e.getAttribute;return a?a.call(e,"type"):""},j=function(){var e=document.getElementsByTagName(k);return e.length>0?e[e.length-1]:null},R=function(e){var a,t=e&&e.getAttribute;if(t&&(a=t.call(e,"data-website-id"))){return a}return null},A=function(e){return"function"==typeof e},s=function(e,a){return e[a]||{}},f=function(){return T[y.dle||"appInsights"]||{trackException:function(){},trackEvent:function(){},trackPageView:function(){},setAuthenticatedUserContext:function(){},clearAuthenticatedUserContext:function(){}}},G=function(){return T[y.dle||"appInsights"]},V=function(){},U=T,r=[];function g(e,a){r.push(arguments)}U[y.dle||"appInsights"]={queue:r,version:2};var h=document,m=h.createElement(k);m.src="https://js.monitor.azure.com/scripts/b/ai.2.min.js";m.crossOrigin="anonymous";var p=j();p?p.parentNode.insertBefore(m,p):h.getElementsByTagName("head")[0].appendChild(m);T[y.dle||"appInsights"]=function(e,a){for(var t=0;t<r.length;t++)r[t].apply(null,arguments);r=[]};}(window,document,{
+  instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"
+});
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -980,7 +982,7 @@ function onSignedIn(account){
   refreshApiToken().then(function(){ loadClients(); });
 }
 var API_SCOPE='api://'+API_APP_ID+'/user_impersonation';
-function signIn(){msalInstance.loginRedirect({scopes:['openid','profile'],redirectUri:REDIRECT_URI});}
+function signIn(){msalInstance.loginRedirect({scopes:['openid','profile',API_SCOPE],redirectUri:REDIRECT_URI});}
 function signOut(){
   aiTrack('UserSignOut',{});
   clearCRMStorage();
