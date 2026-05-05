@@ -904,8 +904,9 @@ function toast(msg, type, duration){
   setTimeout(function(){ t.classList.remove('show'); setTimeout(function(){ if(t.parentNode)t.parentNode.removeChild(t); }, 300); }, duration);
 }
 
-var API_BASE = 'https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net/api';
-var API_KEY  = '1a5e03ed7170ce0b3443cf3662715f3025c432ebca8e3ec9f9d10652aa065485';
+var API_BASE    = 'https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net/api';
+var API_APP_ID  = '0c1627c1-c186-4e46-b919-e4a12f2f3952'; // Easy Auth app registration
+var _apiToken   = null; // cached Bearer token, refreshed automatically
 var SP_CLIENT_ID = '63828fd5-e676-4dd7-bfaa-0055fdb9b3c7';
 var SP_TENANT_ID = '12be0d3c-3e63-429f-bf46-1a2f746aa25f';
 var REDIRECT_URI  = 'https://polite-pebble-039f4a010.7.azurestaticapps.net';
@@ -976,18 +977,30 @@ function onSignedIn(account){
   document.getElementById('userEmail').textContent=email;
   aiTrack('UserSignIn',{email:email});
   resetSessionTimer();
-  loadClients();
+  refreshApiToken().then(function(){ loadClients(); });
 }
 function signIn(){msalInstance.loginRedirect({scopes:['openid','profile'],redirectUri:REDIRECT_URI});}
 function signOut(){
   aiTrack('UserSignOut',{});
   clearCRMStorage();
   clearTimeout(_sessionTimer);
+  _apiToken=null;
   msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});
 }
 
 // ── API HELPERS ────────────────────────────────────────────────
-function apiHeaders(){return{'Content-Type':'application/json','x-api-key':API_KEY};}
+function apiHeaders(){var h={'Content-Type':'application/json'};if(_apiToken)h['Authorization']='Bearer '+_apiToken;return h;}
+function authUploadHeaders(){return _apiToken?{'Authorization':'Bearer '+_apiToken}:{};}
+async function refreshApiToken(){
+  if(!msalInstance)return;
+  var accounts=msalInstance.getAllAccounts();if(!accounts.length)return;
+  try{
+    var res=await msalInstance.acquireTokenSilent({scopes:['api://'+API_APP_ID+'/user_impersonation'],account:accounts[0]});
+    _apiToken=res.accessToken;
+    var ttl=res.expiresOn?(res.expiresOn.getTime()-Date.now()-600000):3000000;
+    setTimeout(refreshApiToken,Math.max(ttl,60000));
+  }catch(e){console.warn('API token refresh failed:',e);}
+}
 
 // ── DATA MAPPING (form fields ↔ DB columns) ────────────────────
 function clientToDbRow(d){
@@ -2141,7 +2154,7 @@ function uploadClientDoc(clientId){
     fd.append('file',file);
     fd.append('clientType','health');
     fd.append('clientId',clientId);
-    return fetch(API_BASE+'/documents',{method:'POST',headers:{'x-api-key':API_KEY},body:fd});
+    return fetch(API_BASE+'/documents',{method:'POST',headers:authUploadHeaders(),body:fd});
   });
   var fileNames=files.map(function(f){return f.name;}).join(', ');
   Promise.all(promises)
