@@ -980,7 +980,7 @@ function onSignedIn(account){
   refreshApiToken().then(function(){ loadClients(); });
 }
 var API_SCOPE='api://'+API_APP_ID+'/user_impersonation';
-function signIn(){msalInstance.loginRedirect({scopes:['openid','profile',API_SCOPE],redirectUri:REDIRECT_URI});}
+function signIn(){msalInstance.loginRedirect({scopes:['openid','profile'],redirectUri:REDIRECT_URI});}
 function signOut(){
   aiTrack('UserSignOut',{});
   clearCRMStorage();
@@ -1001,8 +1001,13 @@ async function refreshApiToken(){
     var ttl=res.expiresOn?(res.expiresOn.getTime()-Date.now()-600000):3000000;
     setTimeout(refreshApiToken,Math.max(ttl,60000));
   }catch(e){
-    console.warn('API token silent refresh failed, redirecting for consent:',e);
-    try{msalInstance.loginRedirect({scopes:['openid','profile',API_SCOPE],redirectUri:REDIRECT_URI});}catch(e2){}
+    console.warn('API token silent refresh failed, opening consent popup:',e);
+    try{
+      var r2=await msalInstance.acquireTokenPopup({scopes:[API_SCOPE]});
+      _apiToken=r2.accessToken;
+      var ttl2=r2.expiresOn?(r2.expiresOn.getTime()-Date.now()-600000):3000000;
+      setTimeout(refreshApiToken,Math.max(ttl2,60000));
+    }catch(e2){console.warn('API token popup also failed:',e2);}
   }
 }
 
