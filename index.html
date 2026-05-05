@@ -979,7 +979,8 @@ function onSignedIn(account){
   resetSessionTimer();
   refreshApiToken().then(function(){ loadClients(); });
 }
-function signIn(){msalInstance.loginRedirect({scopes:['openid','profile'],redirectUri:REDIRECT_URI});}
+var API_SCOPE='api://'+API_APP_ID+'/user_impersonation';
+function signIn(){msalInstance.loginRedirect({scopes:['openid','profile',API_SCOPE],redirectUri:REDIRECT_URI});}
 function signOut(){
   aiTrack('UserSignOut',{});
   clearCRMStorage();
@@ -995,11 +996,14 @@ async function refreshApiToken(){
   if(!msalInstance)return;
   var accounts=msalInstance.getAllAccounts();if(!accounts.length)return;
   try{
-    var res=await msalInstance.acquireTokenSilent({scopes:['api://'+API_APP_ID+'/user_impersonation'],account:accounts[0]});
+    var res=await msalInstance.acquireTokenSilent({scopes:[API_SCOPE],account:accounts[0]});
     _apiToken=res.accessToken;
     var ttl=res.expiresOn?(res.expiresOn.getTime()-Date.now()-600000):3000000;
     setTimeout(refreshApiToken,Math.max(ttl,60000));
-  }catch(e){console.warn('API token refresh failed:',e);}
+  }catch(e){
+    console.warn('API token silent refresh failed, redirecting for consent:',e);
+    try{msalInstance.loginRedirect({scopes:['openid','profile',API_SCOPE],redirectUri:REDIRECT_URI});}catch(e2){}
+  }
 }
 
 // ── DATA MAPPING (form fields ↔ DB columns) ────────────────────

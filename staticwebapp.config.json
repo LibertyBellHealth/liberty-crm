@@ -18,6 +18,6 @@
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://az416426.vo.msecnd.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net https://graph.microsoft.com https://login.microsoftonline.com https://centralus-2.in.applicationinsights.azure.com https://nominatim.openstreetmap.org; frame-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self';"
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://az416426.vo.msecnd.net https://js.monitor.azure.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net https://graph.microsoft.com https://login.microsoftonline.com https://centralus-2.in.applicationinsights.azure.com https://dc.services.visualstudio.com https://nominatim.openstreetmap.org; frame-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self';"
   }
 }
