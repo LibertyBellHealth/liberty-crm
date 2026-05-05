@@ -982,7 +982,9 @@ function onSignedIn(account){
   refreshApiToken().then(function(){ loadClients(); });
 }
 var API_SCOPE='api://'+API_APP_ID+'/user_impersonation';
-function signIn(){msalInstance.loginRedirect({scopes:['openid','profile',API_SCOPE],redirectUri:REDIRECT_URI});}
+// Only Graph scopes in loginRedirect — API_SCOPE from different resource causes 400 on token endpoint.
+// refreshApiToken() acquires API token silently after login (admin consent already granted).
+function signIn(){msalInstance.loginRedirect({scopes:['openid','profile'],redirectUri:REDIRECT_URI});}
 function signOut(){
   aiTrack('UserSignOut',{});
   clearCRMStorage();
