@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718o">
+<link rel="stylesheet" href="styles.css?v=20260718p">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -46,6 +46,17 @@
 
   <div class="main">
 
+    <div id="promptModal" class="modal-backdrop" style="display:none;">
+      <div class="modal-card" style="max-width:420px;">
+        <div class="modal-title" id="promptTitle">Enter value</div>
+        <div id="promptMessage" style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:10px;"></div>
+        <input id="promptInput" type="text" style="width:100%;padding:8px 10px;border:1px solid var(--border-strong);border-radius:6px;font-size:13px;">
+        <div class="modal-actions">
+          <button type="button" class="btn" id="promptCancelBtn">Cancel</button>
+          <button type="button" class="btn btn-blue" id="promptOkBtn">OK</button>
+        </div>
+      </div>
+    </div>
     <div id="confirmModal" class="modal-backdrop" style="display:none;">
       <div class="modal-card" style="max-width:420px;">
         <div class="modal-title" id="confirmTitle">Confirm</div>
@@ -851,8 +862,8 @@
   </div>
 </div>
 
-<script src="routing-lookup.js?v=20260718o"></script>
-<script src="app.js?v=20260718o"></script>
+<script src="routing-lookup.js?v=20260718p"></script>
+<script src="app.js?v=20260718p"></script>
 
 </body>
 </html>

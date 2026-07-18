@@ -74,8 +74,14 @@ function showAuthScreen(){document.getElementById('authScreen').style.display='f
 function onSignedIn(account){
   var email=(account&&(account.username||account.name||'')).toLowerCase();
   if(!ALLOWED_USERS.map(function(u){return u.toLowerCase();}).includes(email)){
-    alert('Access denied. Your account ('+email+') is not authorized for this application.');
-    msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});
+    // In-app denied banner + toast; delay the redirect so the user actually sees why.
+    var box=document.querySelector('.auth-box');
+    if(box){box.innerHTML='<div class="logo">Liberty Bell Health</div>'+
+      '<p style="color:#a02020;font-weight:600;margin-top:12px;">Access denied</p>'+
+      '<p style="color:#666;font-size:13px;margin-bottom:12px;">The account <strong>'+email+'</strong> isn\'t authorized for this application. You will be signed out.</p>'+
+      '<button class="btn btn-blue" style="width:100%;padding:10px;" onclick="msalInstance.logoutRedirect({redirectUri:REDIRECT_URI})">Sign out now</button>';}
+    try{toast('Access denied for '+email,'error');}catch(e){}
+    setTimeout(function(){msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});},4000);
     return;
   }
   document.getElementById('authScreen').style.display='none';
@@ -1638,11 +1644,37 @@ function saveCarriers(){
   localStorage.setItem('crmCarriers',JSON.stringify(carriers));
 }
 function addCarrier(){
-  var name=prompt('Enter carrier name:');
-  if(!name)return;
-  carriers.push({name:name,contact:'',phone:'',email:''});
-  saveCarriers();
-  renderCarriers();
+  showPrompt('Add Carrier','Carrier name:','',function(name){
+    if(!name||!name.trim())return;
+    carriers.push({name:name.trim(),contact:'',phone:'',email:''});
+    saveCarriers();
+    renderCarriers();
+  });
+}
+/* In-app prompt modal — replaces native prompt() dialogs.
+   Usage: showPrompt('Title','Label:','default val',function(val){...}, {okText:'Add'}) */
+function showPrompt(title,message,defaultVal,onOk,opts){
+  opts=opts||{};
+  var modal=document.getElementById('promptModal');if(!modal)return;
+  document.getElementById('promptTitle').textContent=title||'Enter value';
+  document.getElementById('promptMessage').textContent=message||'';
+  var input=document.getElementById('promptInput');
+  input.value=defaultVal||'';
+  input.placeholder=opts.placeholder||'';
+  var okBtn=document.getElementById('promptOkBtn'),cancelBtn=document.getElementById('promptCancelBtn');
+  okBtn.textContent=opts.okText||'OK';
+  cancelBtn.textContent=opts.cancelText||'Cancel';
+  // Replace handlers freshly each open so old callbacks don't stack
+  var newOk=okBtn.cloneNode(true),newCancel=cancelBtn.cloneNode(true);
+  okBtn.parentNode.replaceChild(newOk,okBtn);
+  cancelBtn.parentNode.replaceChild(newCancel,cancelBtn);
+  var close=function(){modal.style.display='none';input.onkeydown=null;};
+  var submit=function(){var v=input.value;close();if(typeof onOk==='function')onOk(v);};
+  newOk.addEventListener('click',submit);
+  newCancel.addEventListener('click',function(){close();if(typeof opts.onCancel==='function')opts.onCancel();});
+  input.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();submit();}else if(e.key==='Escape'){close();}};
+  modal.style.display='flex';
+  setTimeout(function(){input.focus();input.select();},50);
 }
 function renderCarriers(){
   var container=document.getElementById('carrierList');
