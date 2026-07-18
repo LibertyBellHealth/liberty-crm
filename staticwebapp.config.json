@@ -1,16 +1,4 @@
 {
-  "routes": [
-    {
-      "route": "/*",
-      "allowedRoles": ["authenticated"]
-    }
-  ],
-  "responseOverrides": {
-    "401": {
-      "redirect": "/.auth/login/aad",
-      "statusCode": 302
-    }
-  },
   "globalHeaders": {
     "Cache-Control": "no-cache, no-store, must-revalidate",
     "X-Frame-Options": "DENY",
