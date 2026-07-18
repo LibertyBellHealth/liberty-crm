@@ -395,6 +395,7 @@ function filterClients(){
   var plan=document.getElementById('filterPlan').value;
   var special=document.getElementById('filterSpecial').value;
   var renewed=document.getElementById('filterRenewed').value;
+  var leadSource=document.getElementById('filterLeadSource').value;
   var yr=new Date().getFullYear();
   var filtered=clients.filter(function(c){
     if(q){var nm=((c.f_firstName||'')+' '+(c.f_lastName||'')).toLowerCase();var ph=(c.f_phone||'').toLowerCase();var em=(c.f_email||'').toLowerCase();if(!nm.includes(q)&&!ph.includes(q)&&!em.includes(q))return false;}
@@ -402,6 +403,7 @@ function filterClients(){
     if(agent&&c.f_agent!==agent)return false;
     if(plan&&c.f_planType!==plan)return false;
     if(renewed&&c.f_renewed!==renewed)return false;
+    if(leadSource&&c.f_leadSource!==leadSource)return false;
     if(special&&c.f_dob){
       var by=c.f_dob.split('/')[2]||c.f_dob.split('-')[0];var age=yr-parseInt(by);
       if(special==='turning65'&&age!==64&&age!==65)return false;

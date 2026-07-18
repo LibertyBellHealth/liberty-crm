@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717d">
+<link rel="stylesheet" href="styles.css?v=20260717e">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -161,10 +161,11 @@
           <!-- 1. HEALTH INSURANCE PLAN -->
           <div class="form-section">
             <div class="form-section-title">Health Insurance Plan</div>
-            <div class="fg" style="grid-template-columns:1fr 1.5fr 0.8fr 0.8fr 0.8fr;gap:8px;margin-bottom:8px;">
+            <div class="fg" style="grid-template-columns:0.9fr 0.9fr 1.3fr 0.7fr 0.7fr 0.7fr;gap:8px;margin-bottom:8px;">
+              <div class="field"><label>Plan Type</label><select id="f_planType"><option value="">Select</option><option>ACA/Marketplace</option><option>Medicare</option><option>Medicaid</option><option>Short Term</option><option>Ancillary</option></select></div>
               <div class="field"><label>Carrier</label><select id="f_planCarrier"><option value="">Select</option></select></div>
               <div class="field"><label>Plan Name</label><input id="f_planName"></div>
-              <div class="field"><label>Type</label><select id="f_type"><option></option><option>PPO</option><option>HMO</option><option>EPO</option><option>POS</option><option>STM</option><option>MAPD</option><option>Med Supp</option><option>PDP</option></select></div>
+              <div class="field"><label>Network</label><select id="f_type"><option></option><option>PPO</option><option>HMO</option><option>EPO</option><option>POS</option><option>STM</option><option>MAPD</option><option>Med Supp</option><option>PDP</option></select></div>
               <div class="field"><label>Level</label><select id="f_level"><option></option><option>Bronze</option><option>Silver</option><option>Gold</option><option>Platinum</option><option>Catastrophic</option></select></div>
               <div class="field"><label>Deductible</label><input id="f_deductible" oninput="fmtMoney(this)" onblur="fmtMoneyBlur(this)"></div>
             </div>
@@ -827,7 +828,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717d"></script>
+<script src="app.js?v=20260717e"></script>
 
 </body>
 </html>
