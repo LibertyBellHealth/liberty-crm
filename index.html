@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718w">
+<link rel="stylesheet" href="styles.css?v=20260718x">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -30,13 +30,19 @@
     <button class="sb-collapse" id="sbCollapseBtn" onclick="toggleSidebar()" title="Toggle sidebar">&#9776;</button>
     <div class="logo">Liberty Bell Health<span>Client CRM</span></div>
     <button class="nav-btn active" id="navClients" onclick="showView('clients')">Clients</button>
-    <button class="nav-btn" id="navNew" onclick="showView('new')">+ New Client</button>
-    <button class="nav-btn" id="navReports" onclick="showView('reports')">Reports</button>
-    <button class="nav-btn" id="navRecent" onclick="showView('recent')">Recent Records</button>
     <button class="nav-btn" id="navCarriers" onclick="showView('carriers')">Carriers</button>
-    <button class="nav-btn" id="navAdvSearch" onclick="showView('advSearch')">Advanced Search</button>
     <button class="nav-btn" id="navTodo" onclick="showView('todo')">To-Do List</button>
+    <button class="nav-btn" id="navAdvSearch" onclick="showView('advSearch')">Advanced Search</button>
+    <button class="nav-btn" id="navReports" onclick="showView('reports')">Reports</button>
     <button class="nav-btn" id="navSettings" onclick="showView('settings')">Settings</button>
+    <!-- Last 5 recently-opened clients, inline in the sidebar. Names are resolved
+         from the in-memory clients array at render time — nothing lands on disk. -->
+    <div class="sb-recent" id="sbRecent">
+      <button class="sb-recent-head" id="sbRecentHead" onclick="toggleSbRecent()">
+        <span>Recent Records</span><span class="sb-chev" id="sbRecentChev">&#9662;</span>
+      </button>
+      <div class="sb-recent-list" id="sbRecentList"></div>
+    </div>
     <div class="auth-area">
       <div id="userEmail" style="margin-bottom:6px;opacity:0.8;word-break:break-all;"></div>
       <button class="btn" onclick="signOut()" style="width:100%;font-size:11px;background:rgba(255,255,255,0.1);color:#fff;border-color:rgba(255,255,255,0.2);">Sign Out</button>
@@ -891,8 +897,8 @@
 </div>
 
 <script src="routing-lookup.js?v=20260718s"></script>
-<script src="zip-counties.js?v=20260718w"></script>
-<script src="app.js?v=20260718w"></script>
+<script src="zip-counties.js?v=20260718x"></script>
+<script src="app.js?v=20260718x"></script>
 
 </body>
 </html>

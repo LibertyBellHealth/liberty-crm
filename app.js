@@ -283,6 +283,7 @@ function loadClients(){
     });
     if(anyFilter)filterClients();else renderClientTable(clients);
     renderReportCards();renderReminderBanner();refreshReferrerDatalist();
+    renderSidebarRecent(); // names only resolvable once clients are in memory
   }).catch(function(e){console.error('Load error:',e);});
 }
 function saveClientAPI(data,id){
@@ -311,7 +312,8 @@ function _doShowView(v){
   var map={clients:'viewClients',new:'viewNew',form_edit:'viewForm',import:'viewImport',reports:'viewReports',carriers:'viewCarriers',advSearch:'viewAdvSearch',todo:'viewTodo',settings:'viewSettings',recent:'viewRecent'};
   var navMap={clients:'navClients',new:'navNew',reports:'navReports',carriers:'navCarriers',advSearch:'navAdvSearch',todo:'navTodo',settings:'navSettings',recent:'navRecent'};
   var vid=map[v];if(vid)document.getElementById(vid).style.display='block';
-  var nid=navMap[v];if(nid)document.getElementById(nid).classList.add('active');
+  // Some views (new, recent) no longer have a sidebar button — guard against null.
+  var nid=navMap[v];var nel=nid&&document.getElementById(nid);if(nel)nel.classList.add('active');
   if(vid)document.querySelector('.main').scrollTop=0;
   // Clear the deep-link hash when leaving the edit form so URL matches the view
   if(v!=='form_edit'&&window.location.hash){try{history.replaceState(null,'','#');}catch(e){window.location.hash='';}}
@@ -1956,6 +1958,7 @@ function trackRecentRecord(id,_ignored){
   _recentRecords.unshift({id:id,accessed:new Date().toISOString()});
   if(_recentRecords.length>20)_recentRecords=_recentRecords.slice(0,20);
   saveRecentRecords();
+  renderSidebarRecent();
 }
 function renderRecentRecords(){
   var el=document.getElementById('recentRecordsList');
@@ -1991,9 +1994,50 @@ function renderRecentRecords(){
     el.appendChild(div);
   });
 }
+/* Sidebar Recent Records — last 5 openable clients, pinned above Sign Out.
+   Same PHI rule as the full list: only {id, accessed} is persisted, names are
+   resolved from the in-memory clients array here. Entries whose client no longer
+   exists are skipped rather than shown as placeholders (no room in the sidebar). */
+function renderSidebarRecent(){
+  var el=document.getElementById('sbRecentList');if(!el)return;
+  el.innerHTML='';
+  var resolved=[];
+  for(var i=0;i<_recentRecords.length&&resolved.length<5;i++){
+    var r=_recentRecords[i];
+    var c=(clients||[]).find(function(x){return String(x._id)===String(r.id);});
+    if(c)resolved.push(c);
+  }
+  if(!resolved.length){
+    var d=document.createElement('div');
+    d.className='sb-recent-empty';
+    d.textContent='No records opened yet';
+    el.appendChild(d);
+    return;
+  }
+  resolved.forEach(function(c){
+    var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()||'Unnamed';
+    var btn=document.createElement('button');
+    btn.className='sb-recent-item';
+    btn.title=name;
+    var sq=document.createElement('span');sq.className='sb-recent-sq';
+    var lbl=document.createElement('span');lbl.className='sb-recent-name';
+    lbl.textContent=name; // textContent, not innerHTML — client names are user data
+    btn.appendChild(sq);btn.appendChild(lbl);
+    btn.addEventListener('click',function(){editClient(c._id);});
+    el.appendChild(btn);
+  });
+}
+function toggleSbRecent(){
+  var box=document.getElementById('sbRecent');if(!box)return;
+  var collapsed=box.classList.toggle('collapsed');
+  localStorage.setItem('crm_sb_recent_collapsed',collapsed?'1':'0');
+}
+if(localStorage.getItem('crm_sb_recent_collapsed')==='1'){
+  document.getElementById('sbRecent')&&document.getElementById('sbRecent').classList.add('collapsed');
+}
 function clearRecentRecords(){
   showConfirm('Clear recent records history?',function(){
-    _recentRecords=[];saveRecentRecords();renderRecentRecords();
+    _recentRecords=[];saveRecentRecords();renderRecentRecords();renderSidebarRecent();
   },{title:'Clear History',okText:'Clear'});
 }
 

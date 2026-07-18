@@ -110,7 +110,7 @@
 /* Sidebar collapse */
 .sidebar{transition:width 0.18s;position:relative;}
 .sidebar.collapsed{width:44px;}
-.sidebar.collapsed .logo,.sidebar.collapsed .nav-btn,.sidebar.collapsed .auth-area{display:none;}
+.sidebar.collapsed .logo,.sidebar.collapsed .nav-btn,.sidebar.collapsed .auth-area,.sidebar.collapsed .sb-recent{display:none;}
 .sb-collapse{position:absolute;top:12px;right:10px;background:rgba(255,255,255,0.08);border:none;width:24px;height:24px;border-radius:4px;cursor:pointer;color:#9ab5cc;font-size:13px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;}
 .sb-collapse:hover{color:#fff;background:rgba(255,255,255,0.16);}
 .sidebar.collapsed .sb-collapse{top:10px;right:10px;left:auto;}
@@ -164,6 +164,21 @@ body{font-family:Arial,sans-serif;font-size:14px;background:#f4f6f9;color:#222;}
 .nav-btn:hover{background:rgba(255,255,255,0.06);color:#fff;}
 .nav-btn.active{background:var(--accent);color:#fff;font-weight:600;}
 .sidebar .auth-area{margin-top:auto;padding:12px 14px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#9ab5cc;}
+/* Recent Records list pinned to the bottom of the sidebar (above Sign Out).
+   It takes over the margin-top:auto so it, not auth-area, absorbs the free space. */
+.sb-recent{margin-top:auto;border-top:1px solid rgba(255,255,255,0.08);padding-top:8px;}
+.sidebar .sb-recent+.auth-area{margin-top:0;}
+.sb-recent-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 14px 6px;background:none;border:none;cursor:pointer;font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:#6b8dae;}
+.sb-recent-head:hover{color:#9ab5cc;}
+.sb-chev{font-size:10px;transition:transform 0.15s;}
+.sb-recent.collapsed .sb-chev{transform:rotate(-90deg);}
+.sb-recent.collapsed .sb-recent-list{display:none;}
+.sb-recent-list{max-height:190px;overflow-y:auto;padding-bottom:4px;}
+.sb-recent-item{display:flex;align-items:center;gap:9px;width:100%;padding:6px 14px;background:none;border:none;cursor:pointer;text-align:left;font-family:Arial,sans-serif;font-size:12px;color:#cfe0ee;}
+.sb-recent-item:hover{background:rgba(255,255,255,0.06);color:#fff;}
+.sb-recent-sq{width:12px;height:12px;border-radius:2px;background:#4a90d9;flex-shrink:0;}
+.sb-recent-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sb-recent-empty{padding:2px 14px 8px;font-size:11px;color:#5d7d9c;}
 .main{flex:1;overflow-y:auto;display:flex;flex-direction:column;}
 /* Permanent app top bar (client search). Distinct from the per-view .topbar headers. */
 .app-topbar{position:sticky;top:0;z-index:40;flex-shrink:0;display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--surface);border-bottom:1px solid var(--border);}
