@@ -66,6 +66,14 @@
 .pg-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
 .pg-btn:disabled{color:var(--text-subtle);cursor:not-allowed;background:var(--surface-alt);}
 
+/* --- OVERRIDES for Health CRM's original .client-table styles when it ALSO has .entity-table.
+       Both single-class selectors have equal specificity, so we need to target BOTH to win. --- */
+.client-table.entity-table{background:var(--surface);border-radius:6px;overflow:hidden;box-shadow:none;border:1px solid var(--border);}
+.client-table.entity-table thead th{background:var(--surface-alt);color:var(--text-muted);padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;border-bottom:1px solid var(--border);}
+.client-table.entity-table tbody td{padding:9px 12px;font-size:12px;color:var(--text);border-bottom:1px solid #f0f3f7;}
+.client-table.entity-table tbody tr:hover td{background:var(--surface-hover);}
+.client-table.entity-table tbody tr:last-child td{border-bottom:none;}
+
 /* ============================================================
    ORIGINAL Health CRM styles below (pre-port). Kept as-is so
    existing markup keeps rendering; new classes above take priority
