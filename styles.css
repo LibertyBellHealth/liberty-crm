@@ -172,7 +172,7 @@ body{font-family:Arial,sans-serif;font-size:14px;background:#f4f6f9;color:#222;}
 .g4{grid-template-columns:1fr 1fr 1fr 1fr;}
 .g5{grid-template-columns:1fr 1fr 1fr 1fr 1fr;}
 .field{display:flex;flex-direction:column;gap:2px;}
-.field label{font-size:11px;color:#555;font-weight:600;margin-bottom:2px;}
+.field label{font-size:11px;color:#1a2b45;font-weight:700;margin-bottom:2px;letter-spacing:0.2px;}
 .field input,.field select,.field textarea{padding:6px 9px;border:1px solid #ccc;border-radius:4px;font-size:13px;font-family:Arial,sans-serif;background:#fff;}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:#1a3a5c;outline:none;}
 .field textarea{resize:vertical;min-height:60px;}
