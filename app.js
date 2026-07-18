@@ -400,10 +400,11 @@ function filterClients(){
   var filtered=clients.filter(function(c){
     if(q){var nm=((c.f_firstName||'')+' '+(c.f_lastName||'')).toLowerCase();var ph=(c.f_phone||'').toLowerCase();var em=(c.f_email||'').toLowerCase();if(!nm.includes(q)&&!ph.includes(q)&&!em.includes(q))return false;}
     if(ssn4&&c.f_ssn){var l4=(c.f_ssn||'').replace(/\D/g,'').slice(-4);if(l4!==ssn4)return false;}
-    if(agent&&c.f_agent!==agent)return false;
-    if(plan&&c.f_planType!==plan)return false;
-    if(renewed&&c.f_renewed!==renewed)return false;
-    if(leadSource&&c.f_leadSource!==leadSource)return false;
+    var norm=function(v){return (v||'').toString().trim().toLowerCase();};
+    if(agent&&norm(c.f_agent)!==norm(agent))return false;
+    if(plan&&norm(c.f_planType)!==norm(plan))return false;
+    if(renewed&&norm(c.f_renewed)!==norm(renewed))return false;
+    if(leadSource&&norm(c.f_leadSource)!==norm(leadSource))return false;
     if(special&&c.f_dob){
       var by=c.f_dob.split('/')[2]||c.f_dob.split('-')[0];var age=yr-parseInt(by);
       if(special==='turning65'&&age!==64&&age!==65)return false;
