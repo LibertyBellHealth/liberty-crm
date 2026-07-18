@@ -608,11 +608,13 @@ function saveClient(){
 function deleteClient(){
   if(!editingId)return;
   var c=clients.find(function(x){return String(x._id)===String(editingId);});
-  if(!confirm('Delete this client?'))return;
-  deleteClientAPI(editingId).then(function(){
-    aiTrack('ClientDeleted',{clientId:editingId,clientName:c?(c.f_firstName||'')+' '+(c.f_lastName||''):editingId});
-    loadClients();showView('clients');
-  });
+  var name=c?((c.f_firstName||'')+' '+(c.f_lastName||'')).trim():'this client';
+  showConfirm('Delete '+(name||'this client')+'? This cannot be undone.',function(){
+    deleteClientAPI(editingId).then(function(){
+      aiTrack('ClientDeleted',{clientId:editingId,clientName:name||editingId});
+      loadClients();showView('clients');
+    });
+  },{title:'Delete Client',okText:'Delete'});
 }
 
 function fmtMoney(el){
@@ -671,6 +673,34 @@ function removeOtherIncomeRow(btn){
   var row=btn.closest('.oi-row');if(row)row.remove();
   updateOtherIncomeAddBtn();
   calcTotalIncome();
+}
+/* In-app confirm modal — replaces browser confirm() dialogs.
+   Usage: showConfirm('Delete this?', function(){...}, {title:'Delete', okText:'Delete'}) */
+function showConfirm(message,onOk,opts){
+  opts=opts||{};
+  var modal=document.getElementById('confirmModal');if(!modal)return;
+  document.getElementById('confirmTitle').textContent=opts.title||'Confirm';
+  document.getElementById('confirmMessage').textContent=message||'Are you sure?';
+  var okBtn=document.getElementById('confirmOkBtn'),cancelBtn=document.getElementById('confirmCancelBtn');
+  okBtn.textContent=opts.okText||'Confirm';
+  cancelBtn.textContent=opts.cancelText||'Cancel';
+  okBtn.className='btn '+(opts.danger===false?'btn-blue':'btn-red');
+  // Replace handlers freshly each open so old callbacks don't stack
+  var newOk=okBtn.cloneNode(true),newCancel=cancelBtn.cloneNode(true);
+  okBtn.parentNode.replaceChild(newOk,okBtn);
+  cancelBtn.parentNode.replaceChild(newCancel,cancelBtn);
+  var close=function(){modal.style.display='none';};
+  newOk.addEventListener('click',function(){close();if(typeof onOk==='function')onOk();});
+  newCancel.addEventListener('click',function(){close();if(typeof opts.onCancel==='function')opts.onCancel();});
+  modal.style.display='flex';
+}
+/* Row-removal helper used by generated rows so onclick attributes stay short */
+function confirmRemoveRow(el,message,after){
+  showConfirm(message||'Remove this row?',function(){
+    var row=el.closest('.member-row-data')||el.closest('.doctor-row-data')||el.closest('.med-row-data')||el.closest('.ancil-row-wrap')||el.parentNode;
+    if(row&&row.remove)row.remove();
+    if(typeof after==='function')after();
+  },{title:'Remove',okText:'Remove'});
 }
 function openMedsPasteModal(){var m=document.getElementById('medsPasteModal');if(m){document.getElementById('medsPasteInput').value='';m.style.display='flex';setTimeout(function(){document.getElementById('medsPasteInput').focus();},50);}}
 function closeMedsPasteModal(){var m=document.getElementById('medsPasteModal');if(m)m.style.display='none';}
@@ -833,7 +863,7 @@ function addMemberRow(data){
     '<div class="field"><label style="font-size:9px;">Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;font-size:11px;padding:4px 5px;max-width:45px;" value="'+(data&&data.age||'')+'"></div>'+
     '<div class="field"><label style="font-size:9px;">SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11" style="font-size:11px;padding:4px 5px;width:100%;"></div>'+
     mkSel('Insured','insured',['','Yes','No'],data)+
-    '<button type="button" class="icon-btn" onclick="if(confirm(\'Remove this household member?\')){this.parentNode.remove();updateMemberCount();}" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+    '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this household member?\',updateMemberCount)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   document.getElementById('membersContainer').appendChild(div);
   updateMemberCount();
 }
@@ -856,7 +886,7 @@ function addDoctorRow(data){
   div.style.cssText='display:grid;grid-template-columns:2fr 1fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
   div.innerHTML='<div class="field"><label>Doctor Name</label><input data-field="name" value="'+(data&&data.name||'')+'"></div>'+
     '<div class="field"><label>Specialty / Phone</label><input data-field="specialty" value="'+(data&&data.specialty||'')+'"></div>'+
-    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="if(confirm(\'Remove this doctor?\'))this.parentNode.remove()">x</button>';
+    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="confirmRemoveRow(this,\'Remove this doctor?\')">x</button>';
   document.getElementById('doctorsContainer').appendChild(div);
 }
 
@@ -874,7 +904,7 @@ function addMedRow(data){
     '<div class="field"><label>Mg</label><input data-field="mg" value="'+(data&&data.mg||'')+'"></div>'+
     '<div class="field"><label>Frequency</label><input data-field="frequency" value="'+(data&&data.frequency||'')+'"></div>'+
     '<button class="btn" style="padding:3px 8px;align-self:flex-end;font-size:10px;white-space:nowrap;background:#e8f4ec;border-color:#28a745;color:#28a745;" onclick="saveMedFromRow(this)" title="Save this medication to your list">+ Save Med</button>'+
-    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="if(confirm(\'Remove this medication?\'))this.parentNode.remove()">x</button>';
+    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="confirmRemoveRow(this,\'Remove this medication?\')">x</button>';
   document.getElementById('medsContainer').appendChild(div);
 }
 function saveMedFromRow(btn){
@@ -925,7 +955,7 @@ function addAncilRow(data){
     '<div class="field"><label>Premium</label><input data-field="premium" placeholder="$" value="'+(data.premium||'').replace(/"/g,'&quot;')+'" oninput="fmtMoney(this);calcTotalMonthly()" onblur="fmtMoneyBlur(this);calcTotalMonthly()"></div>'+
     '<div class="field"><label>Pay Date</label><input type="date" data-field="payDate" value="'+(data.payDate||'')+'"></div>'+
     '<div class="field"><label>Effective</label><input type="date" data-field="effective" value="'+(data.effective||'')+'"></div>'+
-    '<button type="button" class="icon-btn" onclick="if(confirm(\'Remove this ancillary plan?\')){this.closest(\'.ancil-row-wrap\').remove();calcTotalMonthly();}" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+    '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this ancillary plan?\',calcTotalMonthly)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   wrap.appendChild(main);
   // Dental-only extras: Waive Dental checkbox + previous-carrier fields
   if(type==='Dental'){
@@ -954,8 +984,10 @@ function toggleSelectAll(cb){document.querySelectorAll('.row-cb').forEach(functi
 function updateBulkBtn(){var n=document.querySelectorAll('.row-cb:checked').length;var btn=document.getElementById('bulkDeleteBtn');btn.style.display=n>0?'inline-block':'none';btn.textContent='Delete Selected ('+n+')';}
 function bulkDelete(){
   var ids=Array.from(document.querySelectorAll('.row-cb:checked')).map(function(cb){return cb.dataset.id;});
-  if(!ids.length)return;if(!confirm('Delete '+ids.length+' client(s)?'))return;
-  Promise.all(ids.map(function(id){return deleteClientAPI(id);})).then(function(){loadClients();document.getElementById('bulkDeleteBtn').style.display='none';});
+  if(!ids.length)return;
+  showConfirm('Delete '+ids.length+' client'+(ids.length===1?'':'s')+'? This cannot be undone.',function(){
+    Promise.all(ids.map(function(id){return deleteClientAPI(id);})).then(function(){loadClients();document.getElementById('bulkDeleteBtn').style.display='none';});
+  },{title:'Delete Clients',okText:'Delete '+ids.length});
 }
 
 function renderReportCards(){
@@ -1356,8 +1388,9 @@ function renderRecentRecords(){
   });
 }
 function clearRecentRecords(){
-  if(!confirm('Clear recent records history?'))return;
-  _recentRecords=[];saveRecentRecords();renderRecentRecords();
+  showConfirm('Clear recent records history?',function(){
+    _recentRecords=[];saveRecentRecords();renderRecentRecords();
+  },{title:'Clear History',okText:'Clear'});
 }
 
 // ===================== TODO CLIENT AUTOCOMPLETE =====================
@@ -1527,8 +1560,9 @@ function addPlanTypeSetting(){
   document.getElementById('newPlanTypeInput').value='';renderSettings();
 }
 function removePlanTypeSetting(i){
-  if(!confirm('Remove this plan type?'))return;
-  _settingsPlanTypes.splice(i,1);localStorage.setItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));renderSettings();
+  showConfirm('Remove this plan type?',function(){
+    _settingsPlanTypes.splice(i,1);localStorage.setItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));renderSettings();
+  },{title:'Remove',okText:'Remove'});
 }
 function addProjectCodeSetting(){
   var v=document.getElementById('newProjectCodeInput').value.trim();if(!v)return;
@@ -1537,8 +1571,9 @@ function addProjectCodeSetting(){
   document.getElementById('newProjectCodeInput').value='';renderSettings();
 }
 function removeProjectCodeSetting(i){
-  if(!confirm('Remove this code?'))return;
-  _settingsProjectCodes.splice(i,1);localStorage.setItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
+  showConfirm('Remove this code?',function(){
+    _settingsProjectCodes.splice(i,1);localStorage.setItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
+  },{title:'Remove',okText:'Remove'});
 }
 function exportFullBackup(){
   if(!clients.length){toast('No clients to export.','error');return;}
@@ -1549,10 +1584,11 @@ function exportFullBackup(){
   dlXLSX(rows,'liberty_crm_backup_'+new Date().toISOString().split('T')[0]+'.xlsx');
 }
 function clearPreviewData(){
-  if(!confirm('This will permanently delete all client data saved in Preview Mode. Are you sure?'))return;
-  localStorage.removeItem('crm_preview');
-  clients=[];renderClientTable(clients);renderReportCards();
-  toast('Preview data cleared.','info');
+  showConfirm('This will permanently delete all client data saved in Preview Mode. Are you sure?',function(){
+    localStorage.removeItem('crm_preview');
+    clients=[];renderClientTable(clients);renderReportCards();
+    toast('Preview data cleared.','info');
+  },{title:'Clear Preview Data',okText:'Delete All'});
 }
 
 // ===================== DOCUMENT UPLOAD =====================
@@ -1613,10 +1649,11 @@ function uploadClientDoc(clientId){
   .catch(function(e){status.textContent='Upload failed: '+e;});
 }
 function deleteClientDoc(clientId,encodedName){
-  if(!confirm('Delete this document?'))return;
-  fetch(API_BASE+'/documents?clientType=health&clientId='+clientId+'&name='+encodedName,{method:'DELETE',headers:apiHeaders()})
-  .then(function(){loadClientDocs(clientId);})
-  .catch(function(e){toast('Delete failed: '+e,'error');});
+  showConfirm('Delete this document?',function(){
+    fetch(API_BASE+'/documents?clientType=health&clientId='+clientId+'&name='+encodedName,{method:'DELETE',headers:apiHeaders()})
+    .then(function(){loadClientDocs(clientId);})
+    .catch(function(e){toast('Delete failed: '+e,'error');});
+  },{title:'Delete Document',okText:'Delete'});
 }
 
 // initMSAL called below
@@ -1717,16 +1754,18 @@ function toggleTodo(id){
   saveTodos();renderTodos();
 }
 function deleteTodo(id){
-  if(!confirm('Delete this task?'))return;
-  _todos=_todos.filter(function(x){return x.id!==id;});
-  saveTodos();renderTodos();
+  showConfirm('Delete this task?',function(){
+    _todos=_todos.filter(function(x){return x.id!==id;});
+    saveTodos();renderTodos();
+  },{title:'Delete Task',okText:'Delete'});
 }
 function clearCompletedTodos(){
   var done=_todos.filter(function(x){return x.done;}).length;
-  if(!done){alert('No completed tasks to clear.');return;}
-  if(!confirm('Remove '+done+' completed task'+(done!==1?'s':'')+' ?'))return;
-  _todos=_todos.filter(function(x){return !x.done;});
-  saveTodos();renderTodos();
+  if(!done){toast('No completed tasks to clear.','info');return;}
+  showConfirm('Remove '+done+' completed task'+(done!==1?'s':'')+'?',function(){
+    _todos=_todos.filter(function(x){return !x.done;});
+    saveTodos();renderTodos();
+  },{title:'Clear Completed',okText:'Remove'});
 }
 function setTodoFilter(f){
   _todoFilter=f;
@@ -1874,13 +1913,13 @@ function renderSettings(){
   if(nameEl)nameEl.value=localStorage.getItem('crm_display_name')||'Liberty Bell Health';
 }
 function addAgentSetting(){var v=document.getElementById('newAgentInput').value.trim();if(!v)return;if(_settingsAgents.indexOf(v)!==-1){toast('Agent already exists.','info');return;}_settingsAgents.push(v);document.getElementById('newAgentInput').value='';saveSettings();renderSettings();populateDefaultAgentSelect();}
-function removeAgentSetting(i){if(!confirm('Remove this agent?'))return;_settingsAgents.splice(i,1);saveSettings();renderSettings();populateDefaultAgentSelect();}
+function removeAgentSetting(i){showConfirm('Remove this agent?',function(){_settingsAgents.splice(i,1);saveSettings();renderSettings();populateDefaultAgentSelect();},{title:'Remove',okText:'Remove'});}
 function addLeadSourceSetting(){var v=document.getElementById('newLeadSourceInput').value.trim();if(!v)return;if(_settingsLeadSources.indexOf(v)!==-1){toast('Lead source already exists.','info');return;}_settingsLeadSources.push(v);document.getElementById('newLeadSourceInput').value='';saveSettings();renderSettings();}
-function removeLeadSourceSetting(i){if(!confirm('Remove this lead source?'))return;_settingsLeadSources.splice(i,1);saveSettings();renderSettings();}
+function removeLeadSourceSetting(i){showConfirm('Remove this lead source?',function(){_settingsLeadSources.splice(i,1);saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
 function addCustomMedSetting(){var v=document.getElementById('newCustomMedInput').value.trim();if(!v)return;saveCustomMed(v);document.getElementById('newCustomMedInput').value='';renderSettings();}
-function removeCustomMedSetting(i){if(!confirm('Remove this medication?'))return;_customMeds.splice(i,1);localStorage.setItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();}
+function removeCustomMedSetting(i){showConfirm('Remove this medication?',function(){_customMeds.splice(i,1);localStorage.setItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();},{title:'Remove',okText:'Remove'});}
 function addRenewalSetting(){var v=document.getElementById('newRenewalInput').value.trim();if(!v)return;if(_settingsRenewals.indexOf(v)!==-1){toast('Already exists.','info');return;}_settingsRenewals.push(v);document.getElementById('newRenewalInput').value='';saveSettings();renderSettings();}
-function removeRenewalSetting(i){if(!confirm('Remove this renewal option?'))return;_settingsRenewals.splice(i,1);saveSettings();renderSettings();}
+function removeRenewalSetting(i){showConfirm('Remove this renewal option?',function(){_settingsRenewals.splice(i,1);saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
 function saveCrmName(){var v=document.getElementById('settingsCrmName').value.trim();if(!v)return;localStorage.setItem('crm_display_name',v);document.querySelector('.sidebar .logo').childNodes[0].textContent=v;toast('CRM name updated!','success');}
 
 try{initMSAL();loadCarriers();loadSettingsExtras();applySettingsToDropdowns();}catch(e){console.log('MSAL error:',e);showAuthScreen();}

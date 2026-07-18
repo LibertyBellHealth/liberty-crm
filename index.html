@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717m">
+<link rel="stylesheet" href="styles.css?v=20260717n">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -47,6 +47,16 @@
 
   <div class="main">
 
+    <div id="confirmModal" class="modal-backdrop" style="display:none;">
+      <div class="modal-card" style="max-width:420px;">
+        <div class="modal-title" id="confirmTitle">Confirm</div>
+        <div id="confirmMessage" style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:16px;white-space:pre-wrap;"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" id="confirmCancelBtn">Cancel</button>
+          <button type="button" class="btn btn-red" id="confirmOkBtn">Confirm</button>
+        </div>
+      </div>
+    </div>
     <!-- CLIENTS VIEW — ported to entity-header + entity-table pattern from Home Care CRM -->
     <div id="viewClients" class="view-panel">
       <div class="entity-header">
@@ -842,7 +852,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717m"></script>
+<script src="app.js?v=20260717n"></script>
 
 </body>
 </html>
