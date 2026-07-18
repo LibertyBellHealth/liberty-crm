@@ -27,6 +27,7 @@ var ALLOWED_USERS = [
 /* HTML-escape for interpolating client data into markup. Covers element text AND
    quoted attribute values. Client data reaches the DOM from paste-import and CSV,
    so it is never safe to concatenate raw. Use textContent where practical instead. */
+var _fullRecordFailed=false; // true when GET /health-clients/{id} failed — blocks save
 function escHtml(v){
   return String(v==null?'':v)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -224,7 +225,7 @@ function clientToDbRow(d){
     emergency_phone:d.f_emergencyPhone,
     bank_name:d.f_bankName, account_type:d.f_accountType,
     routing:d.f_routing, account_num:d.f_account, account_name:d.f_accountName,
-    card_type:d.f_cardType, card_number:d.f_cardNumber, card_exp:d.f_cardExp, cvv:d.f_cvv,
+    card_type:d.f_cardType, card_number:d.f_cardNumber, card_exp:d.f_cardExp,
     agent:d.f_agent, submitted_by:d.f_submittedBy, application_date:d.f_date,
     lead_source:d.f_leadSource, lead_date:d.f_leadDate, renewed:d.f_renewed,
     mothers_maiden:d.f_mothersMaiden, notes:d.f_notes,
@@ -240,6 +241,8 @@ function dbRowToClient(row){
     _id:row.id,
     f_firstName:row.first_name, f_mi:row.middle_initial, f_lastName:row.last_name,
     f_dob:row.dob, f_age:row.age, f_gender:row.gender, f_ssn:row.ssn,
+    // list rows carry only masked last-4s; the full values arrive via GET /{id}
+    f_ssnLast4:row.ssn_last4, f_cardLast4:row.card_last4,
     f_relation:row.relation, f_marital:row.marital_status,
     f_tobacco:row.tobacco, f_height:row.height, f_weight:row.weight, f_insured:row.insured,
     f_phone:row.phone, f_altPhone:row.alt_phone, f_email:row.email, f_email2:row.email2,
@@ -271,7 +274,6 @@ function dbRowToClient(row){
     f_bankName:row.bank_name, f_accountType:row.account_type,
     f_routing:row.routing, f_account:row.account_num, f_accountName:row.account_name,
     f_cardType:row.card_type, f_cardNumber:row.card_number, f_cardExp:row.card_exp,
-    f_cvv:row.cvv,
     f_agent:row.agent, f_submittedBy:row.submitted_by, f_date:row.application_date,
     f_leadSource:row.lead_source, f_leadDate:row.lead_date, f_renewed:row.renewed,
     f_mothersMaiden:row.mothers_maiden, f_notes:row.notes,
@@ -720,7 +722,7 @@ function filterClients(){
   var yr=new Date().getFullYear();
   var filtered=clients.filter(function(c){
     if(q){var nm=((c.f_firstName||'')+' '+(c.f_lastName||'')).toLowerCase();var ph=(c.f_phone||'').toLowerCase();var em=(c.f_email||'').toLowerCase();if(!nm.includes(q)&&!ph.includes(q)&&!em.includes(q))return false;}
-    if(ssn4&&c.f_ssn){var l4=(c.f_ssn||'').replace(/\D/g,'').slice(-4);if(l4!==ssn4)return false;}
+    if(ssn4){var l4=(c.f_ssnLast4||c.f_ssn||'').replace(/\D/g,'').slice(-4);if(l4!==ssn4)return false;}
     var norm=function(v){return (v||'').toString().trim().toLowerCase();};
     if(agent&&norm(c.f_agent)!==norm(agent))return false;
     if(plan&&norm(c.f_planType)!==norm(plan))return false;
@@ -913,10 +915,28 @@ function editClient(id){
   // Deep-link URL so bookmarking / copy-link opens this client next time
   try{if(('#/client/'+id)!==window.location.hash)window.location.hash='/client/'+id;}catch(e){}
   editingId=id;
+  _fullRecordFailed=false;
   try{clearForm();}catch(e){console.log('clearForm err:',e);}
   try{loadCarriersToSelect();}catch(e){}
+  // Populate from the list first so the form isn't blank while the fetch is in flight,
+  // then overwrite with the full record. The list deliberately omits SSN / card / bank,
+  // so we MUST fetch the real values before any save — otherwise the save would write
+  // the masked placeholders back over the real data.
   try{setFormData(c);}catch(e){console.log('setFormData err:',e);}
   clearFormDirty();
+  fetch(API_BASE+'/health-clients/'+encodeURIComponent(id),{headers:apiHeaders()})
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(row){
+      // Ignore if the user navigated to a different record while this was loading
+      if(String(editingId)!==String(id))return;
+      try{setFormData(dbRowToClient(row));clearFormDirty();}catch(e){console.log('setFormData(full) err:',e);}
+    })
+    .catch(function(){
+      if(String(editingId)!==String(id))return;
+      // Block saving rather than risk writing blanks over real SSN / card / bank values.
+      _fullRecordFailed=true;
+      toast('Could not load the full record. Sensitive fields are hidden — saving is disabled until you reload.','error');
+    });
   document.getElementById('formTitle').textContent=(c.f_firstName||'')+' '+(c.f_lastName||'');
   document.getElementById('deleteBtn').style.display='inline-block';
   document.getElementById('deleteBtn2').style.display='inline-block';
@@ -935,6 +955,9 @@ function editClient(id){
 function saveClient(onSuccess){
   var data=getFormData();
   if(!data.f_firstName&&!data.f_lastName){toast('Please enter at least a first or last name.','error');return;}
+  // If the full record never loaded, the sensitive fields on screen are blank rather
+  // than real. Saving would write those blanks over the stored SSN / card / bank values.
+  if(_fullRecordFailed){toast('This record did not fully load. Reload the page before saving to avoid overwriting sensitive fields.','error');return;}
   var isNew=!editingId;
   saveClientAPI(data,editingId).then(function(){
     aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientId:editingId||'new'}); // no PHI in telemetry
@@ -1683,7 +1706,9 @@ function dlXLSX(rows,filename){
 
 var CRM_IMPORT_FIELDS=[
   {key:'f_firstName',label:'First Name'},{key:'f_lastName',label:'Last Name'},
-  {key:'f_dob',label:'Date of Birth'},{key:'f_gender',label:'Gender'},{key:'f_ssn',label:'SSN'},
+  {key:'f_dob',label:'Date of Birth'},{key:'f_gender',label:'Gender'},
+  // Full SSN is no longer returned by the list endpoint, so reports export the last 4 only.
+  {key:'f_ssnLast4',label:'SSN (last 4)'},
   {key:'f_phone',label:'Phone'},{key:'f_email',label:'Email'},{key:'f_resAddress',label:'Address'},
   {key:'f_resCity',label:'City'},{key:'f_resSt',label:'State'},{key:'f_resZip',label:'Zip'},
   {key:'f_planName',label:'Plan Name'},{key:'f_planType',label:'Plan Type'},{key:'f_premium',label:'Premium'},
