@@ -60,6 +60,28 @@
 .entity-table thead th{padding:8px 12px;}
 .entity-table tbody td{padding:9px 12px;}
 
+/* Modern action icons (phone / mail / copy) — replaces old emoji buttons */
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:none;background:transparent;color:var(--text-subtle);border-radius:4px;cursor:pointer;vertical-align:middle;margin-left:2px;transition:background 0.12s,color 0.12s;text-decoration:none;}
+.icon-btn:hover{background:var(--surface-hover);color:var(--accent);}
+.icon-btn svg{width:14px;height:14px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;}
+.icon-btn.copied{color:var(--dot-active);}
+
+/* Reminder banner (empty-state style) */
+.reminder-banner{margin:12px 24px 8px;border-radius:6px;padding:11px 16px;font-size:12px;display:flex;align-items:center;gap:10px;line-height:1.5;}
+.reminder-banner.calm{background:#eaf5ee;color:#1a5f3d;border-left:3px solid var(--dot-active);}
+.reminder-banner.active{background:#fef5e7;color:#7a4a00;border-left:3px solid var(--dot-warning);}
+.reminder-banner .rb-label{font-weight:600;}
+.reminder-banner .rb-item{margin-right:14px;}
+.reminder-banner .rb-item a{color:inherit;text-decoration:underline;cursor:pointer;font-weight:600;}
+
+/* Sidebar collapse */
+.sidebar{transition:width 0.18s;position:relative;}
+.sidebar.collapsed{width:44px;}
+.sidebar.collapsed .logo,.sidebar.collapsed .nav-btn,.sidebar.collapsed .auth-area{display:none;}
+.sb-collapse{position:absolute;top:12px;right:10px;background:rgba(255,255,255,0.08);border:none;width:24px;height:24px;border-radius:4px;cursor:pointer;color:#9ab5cc;font-size:13px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;}
+.sb-collapse:hover{color:#fff;background:rgba(255,255,255,0.16);}
+.sidebar.collapsed .sb-collapse{top:10px;right:10px;left:auto;}
+
 /* Kebab (⋮) menu — collapses utility actions on entity headers */
 .kebab-wrap{position:relative;display:inline-block;}
 .kebab-btn{padding:5px 10px;font-size:18px;line-height:1;color:var(--text-muted);}

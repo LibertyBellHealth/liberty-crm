@@ -220,7 +220,14 @@ function loadClients(){
     clients=data.map(function(row){return dbRowToClient(row);});
     // Seed the filtered-results cache so sort/pagination work before any filter is applied
     _clientFilteredCache=clients.slice();
-    renderClientTable(clients);renderReportCards();
+    _lastClientsFetch=Date.now();
+    // If any filter is currently active, re-run it against the new data so state is preserved
+    var anyFilter=false;
+    ['searchInput','searchSSN4','filterAgent','filterPlan','filterSpecial','filterRenewed','filterLeadSource'].forEach(function(id){
+      var el=document.getElementById(id);if(el&&el.value)anyFilter=true;
+    });
+    if(anyFilter)filterClients();else renderClientTable(clients);
+    renderReportCards();renderReminderBanner();
   }).catch(function(e){console.error('Load error:',e);});
 }
 function saveClientAPI(data,id){
@@ -242,6 +249,7 @@ function showView(v){
   var vid=map[v];if(vid)document.getElementById(vid).style.display='block';
   var nid=navMap[v];if(nid)document.getElementById(nid).classList.add('active');
   if(vid)document.querySelector('.main').scrollTop=0;
+  if(v==='clients')maybeRevalidateClients();
   if(v==='carriers')renderCarriers();
   if(v==='todo')renderTodos();
   if(v==='settings'){renderSettings();populateDefaultAgentSelect();}
@@ -321,6 +329,60 @@ function goToClientPage(n){_clientPage=n;renderClientTable(_clientFilteredCache.
 function toggleKebab(e){e.stopPropagation();var m=document.getElementById('clientKebabMenu');if(m)m.classList.toggle('open');}
 function closeKebab(){var m=document.getElementById('clientKebabMenu');if(m)m.classList.remove('open');}
 document.addEventListener('click',function(e){var w=document.querySelector('.kebab-wrap');if(w&&!w.contains(e.target))closeKebab();});
+function toggleSidebar(){
+  var sb=document.getElementById('sidebar');if(!sb)return;
+  sb.classList.toggle('collapsed');
+  try{localStorage.setItem('lch_sidebar_collapsed',sb.classList.contains('collapsed')?'1':'0');}catch(e){}
+}
+(function restoreSidebar(){try{if(localStorage.getItem('lch_sidebar_collapsed')==='1'){var s=document.getElementById('sidebar');if(s)s.classList.add('collapsed');}}catch(e){}})();
+
+/* Reminder banner — surfaces client renewal + age-milestone actions.
+   Called after every loadClients() so numbers stay fresh. */
+function renderReminderBanner(){
+  var el=document.getElementById('reminderBanner');if(!el)return;
+  if(!clients||!clients.length){el.style.display='none';return;}
+  var yr=new Date().getFullYear();
+  var now=new Date();
+  var in60=new Date();in60.setDate(in60.getDate()+60);
+  var renewingSoon=0,turning65=0,turning26=0;
+  clients.forEach(function(c){
+    if(c.f_renewed==='Not Renewed')renewingSoon++;
+    if(c.f_dob){
+      var by=parseInt((c.f_dob.split('-')[0]||c.f_dob.split('/')[2]||'0'));
+      var age=yr-by;
+      if(age===64||age===65)turning65++;
+      if(age===25||age===26)turning26++;
+    }
+  });
+  var items=[];
+  if(renewingSoon)items.push('<span class="rb-item"><a onclick="quickFilterRenewed(\'Not Renewed\')">'+renewingSoon+' client'+(renewingSoon===1?'':'s')+' not renewed</a></span>');
+  if(turning65)items.push('<span class="rb-item"><a onclick="quickFilterSpecial(\'turning65\')">'+turning65+' turning 65 this year</a></span>');
+  if(turning26)items.push('<span class="rb-item"><a onclick="quickFilterSpecial(\'turning26\')">'+turning26+' turning 26 this year</a></span>');
+  if(items.length){
+    el.className='reminder-banner active';
+    el.innerHTML='<span class="rb-label">Attention:</span> '+items.join(' ');
+  } else {
+    el.className='reminder-banner calm';
+    el.innerHTML='<span class="rb-label">All caught up.</span> No renewals or age milestones need attention.';
+  }
+  el.style.display='flex';
+}
+function quickFilterRenewed(v){var s=document.getElementById('filterRenewed');if(s){s.value=v;filterClients();}}
+function quickFilterSpecial(v){var s=document.getElementById('filterSpecial');if(s){s.value=v;filterClients();}}
+
+/* SWR-style revalidation — refetch clients when user returns to Clients view
+   if data is older than 30s. Silent — no spinner unless empty. */
+var _lastClientsFetch=0;
+function maybeRevalidateClients(){
+  var age=Date.now()-_lastClientsFetch;
+  if(age>30000&&spToken){loadClients();}
+}
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='visible'){
+    var cur=document.getElementById('viewClients');
+    if(cur&&cur.style.display!=='none')maybeRevalidateClients();
+  }
+});
 
 function renderClientTable(data){
   var tbody=document.getElementById('clientTableBody');tbody.innerHTML='';
@@ -378,8 +440,8 @@ function renderClientTable(data){
     tr.innerHTML='<td><input type="checkbox" class="row-cb" data-id="'+c._id+'" onchange="updateBulkBtn()"></td>'+
       '<td><span class="client-name-link link-plain" onclick="editClient(\''+c._id+'\')">'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</span></td>'+
       '<td>'+(c.f_dob||'')+'</td>'+
-      '<td>'+phone+(phone?'<a href="tel:'+phone+'" class="copy-btn" title="Call" style="text-decoration:none;">&#x260E;</a><button class="copy-btn" onclick="copyText(\''+phone.replace(/'/g,"\\'")+'\')" title="Copy">&#x1F4CB;</button>':'')+'</td>'+
-      '<td>'+email+(email?'<a href="mailto:'+email+'" class="copy-btn" title="Email" style="text-decoration:none;">&#x2709;</a><button class="copy-btn" onclick="copyText(\''+email.replace(/'/g,"\\'")+'\')" title="Copy">&#x1F4CB;</button>':'')+'</td>'+
+      '<td>'+phone+(phone?'<a href="tel:'+phone+'" class="icon-btn" title="Call">'+SVG_PHONE+'</a><button class="icon-btn" onclick="copyText(\''+phone.replace(/'/g,"\\'")+'\',this)" title="Copy">'+SVG_COPY+'</button>':'')+'</td>'+
+      '<td>'+email+(email?'<a href="mailto:'+email+'" class="icon-btn" title="Email">'+SVG_MAIL+'</a><button class="icon-btn" onclick="copyText(\''+email.replace(/'/g,"\\'")+'\',this)" title="Copy">'+SVG_COPY+'</button>':'')+'</td>'+
       '<td>'+badge+'</td>'+
       '<td>'+(c.f_planName||'')+'</td>'+
       '<td>'+(c.f_premium?'$'+c.f_premium:'')+'</td>'+
@@ -562,8 +624,15 @@ function calcMemberAge(dobEl,ageId){var v=dobEl.value;if(!v)return;var d=new Dat
 function toggleReveal(id,btn){var el=document.getElementById(id);if(el.type==='password'){el.type='text';btn.textContent='Hide';}else{el.type='password';btn.textContent='Show';}}
 function focusReveal(el){el.type='text';}
 function blurReveal(el){el.type='password';}
-function copyField(id){var el=document.getElementById(id);var t=el.type;el.type='text';navigator.clipboard.writeText(el.value);el.type=t;}
-function copyText(txt){navigator.clipboard.writeText(txt);}
+function copyField(id,btn){var el=document.getElementById(id);var t=el.type;el.type='text';navigator.clipboard.writeText(el.value);el.type=t;if(btn){btn.classList.add('copied');var o=btn.innerHTML;btn.innerHTML=SVG_CHECK;setTimeout(function(){btn.classList.remove('copied');btn.innerHTML=o;},1200);}}
+var SVG_PHONE='<svg viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg>';
+var SVG_MAIL='<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22 6 12 13 2 6"/></svg>';
+var SVG_COPY='<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+var SVG_CHECK='<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
+function copyText(txt,btn){
+  navigator.clipboard.writeText(txt);
+  if(btn){var orig=btn.innerHTML;btn.classList.add('copied');btn.innerHTML=SVG_CHECK;setTimeout(function(){btn.classList.remove('copied');btn.innerHTML=orig;},1200);}
+}
 function toggleMedicare(){document.getElementById('medicareFields').style.display=document.getElementById('f_hasMedicare').checked?'block':'none';}
 function toggleMedicaid(){document.getElementById('medicaidFields').style.display=document.getElementById('f_hasMedicaid').checked?'block':'none';}
 function toggleMailingAddress(){document.getElementById('mailingAddressSection').style.display=document.getElementById('f_sameAddress').checked?'none':'block';}
