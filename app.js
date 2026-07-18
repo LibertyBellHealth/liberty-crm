@@ -227,7 +227,7 @@ function loadClients(){
       var el=document.getElementById(id);if(el&&el.value)anyFilter=true;
     });
     if(anyFilter)filterClients();else renderClientTable(clients);
-    renderReportCards();renderReminderBanner();
+    renderReportCards();renderReminderBanner();refreshReferrerDatalist();
   }).catch(function(e){console.error('Load error:',e);});
 }
 function saveClientAPI(data,id){
@@ -480,7 +480,12 @@ function filterClients(){
     if(agent&&norm(c.f_agent)!==norm(agent))return false;
     if(plan&&norm(c.f_planType)!==norm(plan))return false;
     if(renewed&&norm(c.f_renewed)!==norm(renewed))return false;
-    if(leadSource&&norm(c.f_leadSource)!==norm(leadSource))return false;
+    if(leadSource){
+      // 'Referral' filter matches both plain 'Referral' and packed 'Referral: <name>'
+      var cls=norm(c.f_leadSource),fls=norm(leadSource);
+      var match=cls===fls||(fls==='referral'&&cls.indexOf('referral')===0);
+      if(!match)return false;
+    }
     if(special&&c.f_dob){
       var by=c.f_dob.split('/')[2]||c.f_dob.split('-')[0];var age=yr-parseInt(by);
       if(special==='turning65'&&age!==64&&age!==65)return false;
@@ -530,6 +535,8 @@ function clearForm(){
   var ag=document.getElementById('f_agent');if(ag)ag.value=localStorage.getItem('crm_default_agent')||'Thomas Jaboro';
   var sa=document.getElementById('f_diffMailing');if(sa)sa.checked=false;
   var ms=document.getElementById('mailingAddressSection');if(ms)ms.style.display='none';
+  var rb=document.getElementById('f_referredBy');if(rb)rb.value='';
+  var rbf=document.getElementById('referredByField');if(rbf)rbf.style.display='none';
   var mf=document.getElementById('medicareFields');if(mf)mf.style.display='none';
   var mcd=document.getElementById('medicaidFields');if(mcd)mcd.style.display='none';
   var wd=document.getElementById('waiveDentalField');if(wd)wd.style.display='none';
@@ -558,6 +565,12 @@ function getFormData(){
     data['f_otherIncome'+(i+1)]=row?row.querySelector('.oi-src').value:'';
     data['f_otherIncomeAmt'+(i+1)]=row?row.querySelector('.oi-amt').value:'';
   }
+  // Referral packing: if lead source is a referral variant and a name is given,
+  // save as "Referral: <name>" in the existing lead_source column (no schema change).
+  var refByEl=document.getElementById('f_referredBy');
+  var refBy=refByEl?refByEl.value.trim():'';
+  var ls=(data.f_leadSource||'').trim();
+  if(/^referral$/i.test(ls)&&refBy)data.f_leadSource='Referral: '+refBy;
   return data;
 }
 function setFormData(data){
@@ -582,6 +595,14 @@ function setFormData(data){
   var hasBill=!!(data.f_billAddress||data.f_billZip||data.f_billCity);
   var diffCb=document.getElementById('f_diffMailing');
   if(diffCb){diffCb.checked=hasBill;document.getElementById('mailingAddressSection').style.display=hasBill?'block':'none';}
+  // Unpack packed referral: "Referral: John Smith" → leadSource="Referral", referredBy="John Smith"
+  var lsEl=document.getElementById('f_leadSource'),rbEl=document.getElementById('f_referredBy');
+  if(lsEl&&rbEl){
+    var packed=(data.f_leadSource||'').match(/^referral\s*:\s*(.+)$/i);
+    if(packed){lsEl.value='Referral';rbEl.value=packed[1].trim();}
+    else{rbEl.value='';}
+    toggleReferredBy();
+  }
   if(data.f_resZip)restoreCounty(data.f_resZip,'res',data.f_resCounty);
   if(data.f_billZip)restoreCounty(data.f_billZip,'bill',data.f_billCounty);
   updateMemberCount();checkWaiveDental();calcTotalMonthly();
@@ -954,6 +975,35 @@ function wireCopyableFields(){
 }
 /* Install a delegated input listener that auto-clamps all date fields */
 document.addEventListener('input',function(e){if(e.target&&e.target.type==='date')clampDate(e.target);});
+/* Show Referred By field only when the lead source contains 'referral' */
+function toggleReferredBy(){
+  var v=(document.getElementById('f_leadSource')||{}).value||'';
+  var field=document.getElementById('referredByField');
+  if(field)field.style.display=/referral/i.test(v)?'':'none';
+}
+/* Build the referrer typeahead datalist from unique referrers already on file
+   so the same person's name doesn't get typed 5 different ways. */
+function refreshReferrerDatalist(){
+  var dl=document.getElementById('referrerOptions');if(!dl)return;
+  var seen={},names=[];
+  (clients||[]).forEach(function(c){
+    var m=(c.f_leadSource||'').match(/^referral\s*:\s*(.+)$/i);
+    var n=m?m[1].trim():(c.f_referredBy||'').trim();
+    if(n&&!seen[n.toLowerCase()]){seen[n.toLowerCase()]=true;names.push(n);}
+  });
+  names.sort();
+  dl.innerHTML=names.map(function(n){return '<option value="'+n.replace(/"/g,'&quot;')+'">';}).join('');
+}
+/* Count how many times each referrer appears — used by the top-referrers report card */
+function getReferrerCounts(){
+  var counts={};
+  (clients||[]).forEach(function(c){
+    var m=(c.f_leadSource||'').match(/^referral\s*:\s*(.+)$/i);
+    var n=m?m[1].trim():'';
+    if(n){counts[n]=(counts[n]||0)+1;}
+  });
+  return Object.keys(counts).map(function(n){return{name:n,count:counts[n]};}).sort(function(a,b){return b.count-a.count;});
+}
 function updateMemberCount(){document.getElementById('memberCount').textContent=document.querySelectorAll('.member-row-data').length;}
 function populateCountySel(sel,counties,savedVal){
   sel.innerHTML='';
@@ -1028,7 +1078,7 @@ function addDoctorRow(data){
   div.style.cssText='display:grid;grid-template-columns:2fr 1fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
   div.innerHTML='<div class="field"><label>Doctor Name</label><input data-field="name" value="'+(data&&data.name||'')+'"></div>'+
     '<div class="field"><label>Specialty / Phone</label><input data-field="specialty" value="'+(data&&data.specialty||'')+'"></div>'+
-    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="confirmRemoveRow(this,\'Remove this doctor?\')">x</button>';
+    '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this doctor?\')" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   document.getElementById('doctorsContainer').appendChild(div);
 }
 
@@ -1046,7 +1096,7 @@ function addMedRow(data){
     '<div class="field"><label>Mg</label><input data-field="mg" value="'+(data&&data.mg||'')+'"></div>'+
     '<div class="field"><label>Frequency</label><input data-field="frequency" value="'+(data&&data.frequency||'')+'"></div>'+
     '<button class="btn" style="padding:3px 8px;align-self:flex-end;font-size:10px;white-space:nowrap;background:#e8f4ec;border-color:#28a745;color:#28a745;" onclick="saveMedFromRow(this)" title="Save this medication to your list">+ Save Med</button>'+
-    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="confirmRemoveRow(this,\'Remove this medication?\')">x</button>';
+    '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this medication?\')" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   document.getElementById('medsContainer').appendChild(div);
 }
 function saveMedFromRow(btn){
@@ -1145,6 +1195,24 @@ function renderReportCards(){
   ];
   var container=document.getElementById('reportCards');container.innerHTML='';
   cards.forEach(function(card){var div=document.createElement('div');div.className='report-card';div.innerHTML='<div class="num">'+card.num+'</div><div class="lbl">'+card.label+'</div>';div.addEventListener('click',function(){runReport(card.filter,card.label);});container.appendChild(div);});
+  renderTopReferrersCard();
+}
+/* Show a small stacked list of top referrers with counts.
+   Sits next to the report cards so it's visible on the Reports page. */
+function renderTopReferrersCard(){
+  var container=document.getElementById('reportCards');if(!container)return;
+  var refs=getReferrerCounts();
+  if(!refs.length)return;
+  var top=refs.slice(0,5);
+  var div=document.createElement('div');
+  div.className='report-card';
+  div.style.cssText='min-width:200px;';
+  var items=top.map(function(r){
+    return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid #f0f3f7;"><span>'+r.name+'</span><strong style="color:var(--accent);">'+r.count+'</strong></div>';
+  }).join('');
+  div.innerHTML='<div class="lbl" style="margin-bottom:6px;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:0.4px;">Top Referrers</div>'+items+
+    (refs.length>5?'<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">+ '+(refs.length-5)+' more</div>':'');
+  container.appendChild(div);
 }
 function runReport(filter,title){
   var yr=new Date().getFullYear();function age(c){if(!c.f_dob)return null;var y=c.f_dob.split('/')[2]||c.f_dob.split('-')[0];return yr-parseInt(y);}
@@ -2019,10 +2087,12 @@ function saveSettings(){
 }
 loadSettings();
 function applySettingsToDropdowns(){
-  function repopSel(id,items,blank){var sel=document.getElementById(id);if(!sel)return;var cur=sel.value;sel.innerHTML=blank||'';items.forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;sel.appendChild(o);});sel.value=cur;}
+  function repopSel(id,items,blank){var sel=document.getElementById(id);if(!sel||sel.tagName!=='SELECT')return;var cur=sel.value;sel.innerHTML=blank||'';items.forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;sel.appendChild(o);});sel.value=cur;}
+  function repopDatalist(id,items){var dl=document.getElementById(id);if(!dl)return;dl.innerHTML='';items.forEach(function(v){var o=document.createElement('option');o.value=v;dl.appendChild(o);});}
   repopSel('f_agent',_settingsAgents,'');
   repopSel('rpt_filterAgent',_settingsAgents,'<option value="">All</option>');
-  repopSel('f_leadSource',_settingsLeadSources,'<option value=""></option>');
+  repopDatalist('leadSourceOptions',_settingsLeadSources);
+  refreshReferrerDatalist();
   repopSel('rpt_filterLeadSource',_settingsLeadSources,'<option value="">All</option>');
   repopSel('as_leadSource',_settingsLeadSources,'<option value="">All</option>');
   repopSel('f_renewed',_settingsRenewals,'<option value=""></option>');
