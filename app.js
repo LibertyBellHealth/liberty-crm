@@ -267,6 +267,146 @@ function _doShowView(v){
   if(v==='recent')renderRecentRecords();
 }
 
+function openDiscoveryPasteModal(){var m=document.getElementById('discoveryPasteModal');if(m){document.getElementById('discoveryPasteInput').value='';m.style.display='flex';setTimeout(function(){document.getElementById('discoveryPasteInput').focus();},50);}}
+function closeDiscoveryPasteModal(){var m=document.getElementById('discoveryPasteModal');if(m)m.style.display='none';}
+
+/* Parse a filled discovery template into a client + members structure.
+   Recognizes labels ending in "-" or ":". Blank values are skipped. Spouse
+   and Child blocks only create members when they have any data. Ignores
+   fields the user chose to skip (SEP, HA/S/C, D/V, Preexisting Conditions,
+   Hospital, Rx (handled elsewhere), etc). */
+function parseDiscoveryText(text){
+  var lines=(text||'').split(/\r?\n/);
+  var section='primary'; // primary | spouse | child1 | child2 | child3 | child4
+  var data={};        // top-level primary values (f_firstName etc.)
+  var members={};      // section -> {firstName,mi,lastName,relation,...}
+  var meds=[]; // still parsed if Rx line supplied
+  var doctors=[]; // still parsed if Primary Dr / Specialist / Hospital supplied
+  var notesExtras=[];
+
+  function setPrimary(field,val){data['f_'+field]=val;}
+  function setMember(sec,rel,field,val){
+    if(!members[sec])members[sec]={relation:rel};
+    members[sec][field]=val;
+  }
+
+  for(var i=0;i<lines.length;i++){
+    var raw=lines[i]; var line=raw.trim();
+    if(!line)continue;
+    // Section headers first (bare labels, not "field-value" lines)
+    if(/^spouse\s*[-:]?\s*$/i.test(line)){section='spouse';continue;}
+    var childMatch=line.match(/^child\s*(\d)\s*[-:]?\s*$/i);
+    if(childMatch){section='child'+childMatch[1];continue;}
+    // Parse "Label- value" or "Label: value"
+    var m=line.match(/^([^\-:]+?)\s*[-:]\s*(.*)$/);
+    if(!m)continue;
+    var label=m[1].trim().toLowerCase(),val=m[2].trim();
+    if(!val)continue; // skip blanks
+
+    // Primary-only fields
+    if(section==='primary'){
+      if(label==='lead source'){setPrimary('leadSource',val);continue;}
+      if(label==='phone number'||label==='phone'){setPrimary('phone',formatPhoneStr(val));continue;}
+      if(label==='inquiry date'||label==='lead date'){setPrimary('leadDate',parseDateStr(val));continue;}
+      if(label==='time'){notesExtras.push('Inquiry time: '+val);continue;}
+      if(label==='name'){
+        var parts=val.split(/\s+/);
+        setPrimary('firstName',parts.shift()||'');
+        if(parts.length){var last=parts.pop();setPrimary('lastName',last);if(parts.length)setPrimary('mi',parts.join(' ').charAt(0));}
+        continue;
+      }
+      if(label==='email'){setPrimary('email',val);continue;}
+      if(label==='state'){setPrimary('resSt',val.toUpperCase().slice(0,2));continue;}
+      if(label==='zip'){setPrimary('resZip',val.replace(/\D/g,'').slice(0,5));continue;}
+      if(label==='county'){setPrimary('resCounty',val);continue;}
+      if(label==='household income'){setPrimary('primaryIncome',val.replace(/[^\d.]/g,''));continue;}
+      if(label==='primary dr'||label==='primary doctor'){doctors.push({name:val,specialty:'Primary'});continue;}
+      if(label==='specialist'){doctors.push({name:val,specialty:'Specialist'});continue;}
+      if(label==='rx'||label==='medications'){
+        // Split rx by comma or semicolon; use existing meds parser per entry
+        val.split(/[,;]/).forEach(function(m){var parsed=parseMedLine(m.trim());if(parsed&&(parsed.name||parsed.mg))meds.push(parsed);});
+        continue;
+      }
+    }
+
+    // Shared "person" fields — always apply to whichever section we're in
+    var normLabel=label.replace(/[^\w]/g,''); // "m/f" → "mf"
+    var isPrimaryScope=(section==='primary');
+    var mapField=null;
+    if(normLabel==='dob'||label==='date of birth')mapField='dob';
+    else if(normLabel==='age')mapField='age';
+    else if(normLabel==='mf'||label==='gender'||label==='m/f')mapField='gender';
+    else if(normLabel==='tobacco')mapField='tobacco';
+    else if(normLabel==='height')mapField='height';
+    else if(normLabel==='weight')mapField='weight';
+    if(!mapField)continue;
+    // Normalize DOB to yyyy-mm-dd; normalize M/F to M or F
+    if(mapField==='dob')val=parseDateStr(val);
+    if(mapField==='gender'){var g=val.toUpperCase().charAt(0);val=(g==='M'||g==='F')?g:'';if(!val)continue;}
+    if(mapField==='tobacco'){var t=val.toLowerCase();val=/^y|1|smok/.test(t)?'Yes':(/^n|0/.test(t)?'No':'');if(!val)continue;}
+
+    if(isPrimaryScope){setPrimary(mapField,val);}
+    else if(section==='spouse'){setMember('spouse','Spouse',mapField,val);}
+    else if(section.indexOf('child')===0){setMember(section,'Child',mapField,val);}
+  }
+
+  // Build members array in order, filtering out any that ended up empty
+  var memberList=[];
+  ['spouse','child1','child2','child3','child4'].forEach(function(sec){
+    var mem=members[sec];if(!mem)return;
+    var hasData=Object.keys(mem).some(function(k){return k!=='relation'&&(mem[k]||'').toString().trim();});
+    if(hasData)memberList.push(mem);
+  });
+
+  return {data:data,members:memberList,meds:meds,doctors:doctors,notesExtras:notesExtras};
+}
+function parseDateStr(s){
+  // Accepts YYYY-MM-DD, MM/DD/YYYY, MM/DD/YY, M-D-YY, etc. Returns YYYY-MM-DD or original.
+  if(!s)return s;var t=s.trim();
+  var iso=t.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(iso)return iso[1]+'-'+String(iso[2]).padStart(2,'0')+'-'+String(iso[3]).padStart(2,'0');
+  var us=t.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+  if(us){var y=us[3];if(y.length===2)y=(parseInt(y)>30?'19':'20')+y;return y+'-'+String(us[1]).padStart(2,'0')+'-'+String(us[2]).padStart(2,'0');}
+  return t;
+}
+function formatPhoneStr(s){var d=(s||'').replace(/\D/g,'').slice(0,10);if(d.length!==10)return s;return '('+d.slice(0,3)+') '+d.slice(3,6)+'-'+d.slice(6);}
+
+function importDiscoveryPaste(){
+  var text=document.getElementById('discoveryPasteInput').value||'';
+  if(!text.trim()){closeDiscoveryPasteModal();return;}
+  var parsed=parseDiscoveryText(text);
+  closeDiscoveryPasteModal();
+  // Boot up a new health app (clears form, opens edit view)
+  startNewApp('health');
+  // Populate — done in a timeout to let the view + starter rows render first
+  setTimeout(function(){
+    Object.keys(parsed.data).forEach(function(k){
+      var el=document.getElementById(k);if(!el)return;
+      if(el.type==='checkbox')el.checked=!!parsed.data[k];else el.value=parsed.data[k];
+    });
+    // Members: reset container (startNewApp doesn't add a starter member row)
+    var memC=document.getElementById('membersContainer');if(memC)memC.innerHTML='';
+    parsed.members.forEach(function(m){addMemberRow(m);});
+    // Doctors / meds: startNewApp added one empty starter row each — wipe first
+    var docC=document.getElementById('doctorsContainer');if(docC)docC.innerHTML='';
+    parsed.doctors.forEach(function(d){addDoctorRow(d);});
+    if(!parsed.doctors.length)addDoctorRow(); // keep an empty starter
+    var medC=document.getElementById('medsContainer');if(medC)medC.innerHTML='';
+    parsed.meds.forEach(function(m){addMedRow(m);});
+    if(!parsed.meds.length)addMedRow();
+    // Extras (like inquiry time) → append to notes
+    if(parsed.notesExtras.length){
+      var n=document.getElementById('f_notes');if(n)n.value=(n.value?n.value+'\n\n':'')+parsed.notesExtras.join('\n');
+    }
+    // Trigger age recalc + zip lookup so derived fields fill in
+    if(parsed.data.f_dob){try{calcAge();}catch(e){}}
+    if(parsed.data.f_resZip){try{lookupZip(document.getElementById('f_resZip'),'res');}catch(e){}}
+    markFormDirty();
+    updateMemberCount();
+    toast('Imported '+parsed.members.length+' member'+(parsed.members.length===1?'':'s')+' + '+parsed.meds.length+' med'+(parsed.meds.length===1?'':'s')+' + '+parsed.doctors.length+' doctor'+(parsed.doctors.length===1?'':'s'),'success');
+  },80);
+}
+
 function startNewApp(type){
   if(type==='life'){toast('Life App coming soon!','info');return;}
   try{clearForm();}catch(e){console.log('clearForm error:',e);}
