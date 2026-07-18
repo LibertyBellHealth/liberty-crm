@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717s">
+<link rel="stylesheet" href="styles.css?v=20260717t">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -235,8 +235,7 @@
 
           <!-- 3. DEMOGRAPHICS & HOUSEHOLD -->
           <div class="form-section">
-            <div class="form-section-title">Demographics & Household Members</div>
-            <span class="primary-label">Primary Insured</span>
+            <div class="form-section-title">Household Members</div>
             <div class="fg member-row" style="grid-template-columns:1.4fr 0.3fr 1.4fr 0.7fr 0.5fr 0.5fr 0.55fr 0.5fr 0.5fr 0.85fr 0.45fr 1.2fr 0.6fr 30px;gap:6px;margin-bottom:10px;align-items:end;">
               <div class="field"><label>First Name</label><input id="f_firstName"></div>
               <div class="field"><label>MI</label><input id="f_mi" maxlength="1"></div>
@@ -255,8 +254,7 @@
               <div class="field"><label>Insured</label><select id="f_insured"><option></option><option>Yes</option><option>No</option></select></div>
               <div></div>
             </div>
-            <span class="primary-label">Household Members</span>
-            <div id="membersContainer"></div>
+            <div id="membersContainer" style="margin-top:6px;"></div>
             <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
               <button class="btn add-row-btn" onclick="addMemberRow()">+ Add Household Member</button>
               <span style="font-size:11px;color:var(--text-muted);">Total: <strong id="memberCount" style="color:var(--text);">0</strong></span>
@@ -414,7 +412,7 @@
           <!-- 12. AGENT INFORMATION -->
           <div class="form-section">
             <div class="form-section-title">Agent Information</div>
-            <div class="fg" style="grid-template-columns:180px 200px 200px 160px 160px;gap:10px;align-items:end;">
+            <div class="fg" style="grid-template-columns:1.1fr 1.2fr 1.4fr 1fr 1fr;gap:10px;align-items:end;">
               <div class="field"><label>Agent</label><select id="f_agent"><option>Thomas Jaboro</option><option>Paul Jaboro Jr.</option></select></div>
               <div class="field"><label>Lead Source</label>
                 <input id="f_leadSource" list="leadSourceOptions" placeholder="Select or type..." autocomplete="off" oninput="toggleReferredBy()">
@@ -853,7 +851,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717s"></script>
+<script src="app.js?v=20260717t"></script>
 
 </body>
 </html>
