@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717a">
+<link rel="stylesheet" href="styles.css?v=20260717b">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -46,13 +46,15 @@
 
   <div class="main">
 
-    <!-- CLIENTS VIEW -->
+    <!-- CLIENTS VIEW — ported to entity-header + entity-table pattern from Home Care CRM -->
     <div id="viewClients" class="view-panel">
-      <div class="topbar">
-        <h2>Clients <span id="clientCount" style="font-size:12px;color:#999;font-weight:normal;"></span></h2>
-        <button class="btn btn-green" onclick="showView('new')">+ New Client</button>
-        <button class="btn btn-red" id="bulkDeleteBtn" onclick="bulkDelete()" style="display:none;">Delete Selected</button>
-        <button class="btn" onclick="exportExcel()">&#128202; Export Excel</button>
+      <div class="entity-header">
+        <div class="titles"><h1>Clients</h1></div>
+        <div class="actions">
+          <button class="btn btn-red" id="bulkDeleteBtn" onclick="bulkDelete()" style="display:none;">Delete Selected</button>
+          <button class="btn" onclick="exportExcel()">Export Excel</button>
+          <button class="btn btn-green" onclick="showView('new')">+ New Client</button>
+        </div>
       </div>
       <div class="search-bar">
         <input id="searchInput" placeholder="Search name, phone, email..." oninput="filterClients()">
@@ -89,17 +91,42 @@
         <button class="btn" onclick="clearFilters()">Clear</button>
       </div>
       <div class="client-list">
-        <table class="client-table">
+        <table class="client-table entity-table" id="clientTable">
           <thead><tr>
-            <th style="width:30px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
-            <th>Name</th><th>DOB</th><th>Phone</th><th>Email</th>
-            <th>Plan Type</th><th>Plan Name</th><th>Premium</th><th>Agent</th><th>Renewed</th><th>Home Care</th>
+            <th style="width:26px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
+            <th class="sortable resizable" data-sortkey="name" data-col="name" onclick="sortClientBy('name')">Name<span class="resize-handle" onmousedown="startColResize(event,'name')"></span></th>
+            <th class="sortable resizable" data-sortkey="dob" data-col="dob" onclick="sortClientBy('dob')">DOB<span class="resize-handle" onmousedown="startColResize(event,'dob')"></span></th>
+            <th class="sortable resizable" data-sortkey="phone" data-col="phone" onclick="sortClientBy('phone')">Phone<span class="resize-handle" onmousedown="startColResize(event,'phone')"></span></th>
+            <th class="sortable resizable" data-sortkey="email" data-col="email" onclick="sortClientBy('email')">Email<span class="resize-handle" onmousedown="startColResize(event,'email')"></span></th>
+            <th class="sortable resizable" data-sortkey="planType" data-col="planType" onclick="sortClientBy('planType')">Plan Type<span class="resize-handle" onmousedown="startColResize(event,'planType')"></span></th>
+            <th class="sortable resizable" data-sortkey="planName" data-col="planName" onclick="sortClientBy('planName')">Plan Name<span class="resize-handle" onmousedown="startColResize(event,'planName')"></span></th>
+            <th class="sortable resizable" data-sortkey="premium" data-col="premium" onclick="sortClientBy('premium')">Premium<span class="resize-handle" onmousedown="startColResize(event,'premium')"></span></th>
+            <th class="sortable resizable" data-sortkey="agent" data-col="agent" onclick="sortClientBy('agent')">Agent<span class="resize-handle" onmousedown="startColResize(event,'agent')"></span></th>
+            <th class="sortable resizable" data-sortkey="renewed" data-col="renewed" onclick="sortClientBy('renewed')">Renewed<span class="resize-handle" onmousedown="startColResize(event,'renewed')"></span></th>
+            <th class="sortable" data-sortkey="homeCare" data-col="homeCare" onclick="sortClientBy('homeCare')">Home Care</th>
           </tr></thead>
           <tbody id="clientTableBody"></tbody>
         </table>
         <div id="emptyState" class="empty-state" style="display:none;">
           <p style="font-size:16px;margin-bottom:8px;">No clients found</p>
           <p style="font-size:12px;">Add a new client or import from CSV</p>
+        </div>
+        <!-- Pagination footer: count on left, page-size selector + page controls on right -->
+        <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+          <span id="clientCount" style="font-size:12px;color:var(--text-muted);"></span>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <span style="font-size:12px;color:var(--text-muted);">
+              Show
+              <select id="clientPageSize" onchange="clientPageSizeChange()" style="font-size:12px;padding:3px 6px;border:1px solid var(--border-strong);border-radius:4px;margin-left:4px;">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="all">All</option>
+              </select>
+            </span>
+            <div id="clientPageControls" style="display:flex;gap:2px;"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -800,7 +827,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717a"></script>
+<script src="app.js?v=20260717b"></script>
 
 </body>
 </html>

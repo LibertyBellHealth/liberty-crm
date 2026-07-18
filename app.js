@@ -262,12 +262,103 @@ function startNewApp(type){
 }
 function fmtToday(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 
+// ── Client-table sort / pagination / resize state (mirrors Home Care CRM pattern) ──
+var _clientSort={key:'name',dir:'asc'};
+var _clientColDefaults={name:14,dob:8,phone:11,email:16,planType:9,planName:12,premium:8,agent:10,renewed:7,homeCare:8};
+var _clientColumnWidths=null;
+var _clientPage=1;
+var _clientPageSize=25;
+(function loadClientPrefs(){
+  try{
+    var w=localStorage.getItem('lch_client_col_widths');if(w)_clientColumnWidths=JSON.parse(w);
+    var ps=localStorage.getItem('lch_client_page_size');
+    if(ps==='all')_clientPageSize=Infinity;else if(ps){var n=parseInt(ps);if(n>0)_clientPageSize=n;}
+  }catch(e){}
+})();
+// Filtered-results cache — sort + pagination re-render from this without re-filtering.
+var _clientFilteredCache=[];
+function sortClientBy(key){if(_clientSort.key===key)_clientSort.dir=_clientSort.dir==='asc'?'desc':'asc';else{_clientSort.key=key;_clientSort.dir='asc';}renderClientTable(_clientFilteredCache.slice());}
+function _clientSortCompare(a,b){
+  var key=_clientSort.key,dir=_clientSort.dir==='asc'?1:-1;
+  function val(k,c){
+    if(k==='name')return ((c.f_firstName||'')+' '+(c.f_lastName||'')).toLowerCase();
+    if(k==='dob'){if(!c.f_dob)return 0;var d=new Date(c.f_dob);return isNaN(d)?0:d.getTime();}
+    if(k==='phone')return (c.f_phone||'').toLowerCase();
+    if(k==='email')return (c.f_email||'').toLowerCase();
+    if(k==='planType')return (c.f_planType||'').toLowerCase();
+    if(k==='planName')return (c.f_planName||'').toLowerCase();
+    if(k==='premium')return parseFloat(c.f_premium||0)||0;
+    if(k==='agent')return (c.f_agent||'').toLowerCase();
+    if(k==='renewed')return (c.f_renewed||'').toLowerCase();
+    if(k==='homeCare')return (c.homecare_client_id||c.f_homecareClientId)?1:0;
+    return 0;
+  }
+  var va=val(key,a),vb=val(key,b);
+  if(typeof va==='string')return va.localeCompare(vb)*dir;
+  return (va<vb?-1:va>vb?1:0)*dir;
+}
+function applyClientColWidths(){
+  var headers=document.querySelectorAll('#clientTable thead th[data-col]');
+  headers.forEach(function(th){
+    var col=th.dataset.col;
+    var w=(_clientColumnWidths&&_clientColumnWidths[col])||_clientColDefaults[col];
+    if(w)th.style.width=w+'%';
+  });
+}
+function startColResize(e,col){
+  e.preventDefault();e.stopPropagation();
+  var th=e.target.closest('th');if(!th)return;
+  var startX=e.pageX,startWidth=th.offsetWidth,tableWidth=th.closest('table').offsetWidth;
+  document.body.style.cursor='col-resize';document.body.style.userSelect='none';
+  function onMove(ev){var d=ev.pageX-startX;var nx=Math.max(60,startWidth+d);var pct=(nx/tableWidth)*100;th.style.width=pct+'%';if(!_clientColumnWidths)_clientColumnWidths={};_clientColumnWidths[col]=pct;}
+  function onUp(){document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);document.body.style.cursor='';document.body.style.userSelect='';try{localStorage.setItem('lch_client_col_widths',JSON.stringify(_clientColumnWidths||{}));}catch(e){}}
+  document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
+}
+function clientPageSizeChange(){var s=document.getElementById('clientPageSize');var v=s.value;if(v==='all')_clientPageSize=Infinity;else _clientPageSize=parseInt(v)||25;_clientPage=1;try{localStorage.setItem('lch_client_page_size',v);}catch(e){}renderClientTable(_clientFilteredCache.slice());}
+function goToClientPage(n){_clientPage=n;renderClientTable(_clientFilteredCache.slice());}
+
 function renderClientTable(data){
   var tbody=document.getElementById('clientTableBody');tbody.innerHTML='';
-  document.getElementById('clientCount').textContent='('+data.length+')';
-  if(!data.length){document.getElementById('emptyState').style.display='block';return;}
+
+  // Sort the incoming filtered data using the current column-sort state
+  data.sort(_clientSortCompare);
+
+  // Reflect sort arrows on the headers
+  var headers=document.querySelectorAll('#clientTable thead th.sortable');
+  headers.forEach(function(h){h.classList.remove('sort-asc','sort-desc');if(h.dataset.sortkey===_clientSort.key)h.classList.add(_clientSort.dir==='asc'?'sort-asc':'sort-desc');});
+  applyClientColWidths();
+
+  // Pagination — slice to current page
+  var totalMatched=data.length;
+  var totalPages=Math.max(1,Math.ceil(totalMatched/_clientPageSize));
+  if(_clientPage>totalPages)_clientPage=totalPages;
+  var startIdx=(_clientPage-1)*_clientPageSize;
+  var endIdx=Math.min(startIdx+_clientPageSize,totalMatched);
+  var visible=data.slice(startIdx,endIdx);
+
+  // Count + page controls in the footer
+  var countEl=document.getElementById('clientCount');
+  if(countEl){
+    if(!totalMatched)countEl.textContent='';
+    else if(_clientPageSize===Infinity||totalMatched<=_clientPageSize)countEl.textContent=totalMatched+' client'+(totalMatched===1?'':'s');
+    else countEl.textContent='Showing '+(startIdx+1)+'–'+endIdx+' of '+totalMatched;
+  }
+  var pageControls=document.getElementById('clientPageControls');
+  if(pageControls){
+    if(totalPages<=1)pageControls.innerHTML='';
+    else {
+      var html='<button class="pg-btn" onclick="goToClientPage('+(_clientPage-1)+')"'+(_clientPage===1?' disabled':'')+'>‹</button>';
+      var startPg=Math.max(1,_clientPage-2),endPg=Math.min(totalPages,startPg+4);
+      if(endPg-startPg<4)startPg=Math.max(1,endPg-4);
+      for(var p=startPg;p<=endPg;p++)html+='<button class="pg-btn'+(p===_clientPage?' active':'')+'" onclick="goToClientPage('+p+')">'+p+'</button>';
+      html+='<button class="pg-btn" onclick="goToClientPage('+(_clientPage+1)+')"'+(_clientPage===totalPages?' disabled':'')+'>›</button>';
+      pageControls.innerHTML=html;
+    }
+  }
+
+  if(!totalMatched){document.getElementById('emptyState').style.display='block';return;}
   document.getElementById('emptyState').style.display='none';
-  data.forEach(function(c){
+  visible.forEach(function(c){
     var tr=document.createElement('tr');
     var bc='badge-blue';
     if(c.f_planType==='Medicare')bc='badge-green';
@@ -275,8 +366,12 @@ function renderClientTable(data){
     else if(c.f_planType==='Short Term')bc='badge-red';
     var badge=c.f_planType?'<span class="badge '+bc+'">'+c.f_planType+'</span>':'';
     var phone=c.f_phone||'';var email=c.f_email||'';
+    // Renewed status → dot + plain text (matches Home Care's status pattern)
+    var renewedRaw=(c.f_renewed||'').trim();
+    var renewedDotClass=renewedRaw==='2026 Renewed'||renewedRaw.indexOf('Renewed')===0?'renewed':(renewedRaw==='Not Renewed'?'notrenewed':'');
+    var renewedCell=renewedRaw?'<span class="status-inline"><span class="status-dot '+renewedDotClass+'"></span>'+renewedRaw+'</span>':'';
     tr.innerHTML='<td><input type="checkbox" class="row-cb" data-id="'+c._id+'" onchange="updateBulkBtn()"></td>'+
-      '<td><span class="client-name-link" onclick="editClient(\''+c._id+'\')">'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</span></td>'+
+      '<td><span class="client-name-link link-plain" onclick="editClient(\''+c._id+'\')">'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</span></td>'+
       '<td>'+(c.f_dob||'')+'</td>'+
       '<td>'+phone+(phone?'<a href="tel:'+phone+'" class="copy-btn" title="Call" style="text-decoration:none;">&#x260E;</a><button class="copy-btn" onclick="copyText(\''+phone.replace(/'/g,"\\'")+'\')" title="Copy">&#x1F4CB;</button>':'')+'</td>'+
       '<td>'+email+(email?'<a href="mailto:'+email+'" class="copy-btn" title="Email" style="text-decoration:none;">&#x2709;</a><button class="copy-btn" onclick="copyText(\''+email.replace(/'/g,"\\'")+'\')" title="Copy">&#x1F4CB;</button>':'')+'</td>'+
@@ -284,10 +379,14 @@ function renderClientTable(data){
       '<td>'+(c.f_planName||'')+'</td>'+
       '<td>'+(c.f_premium?'$'+c.f_premium:'')+'</td>'+
       '<td>'+(c.f_agent||'')+'</td>'+
-      '<td>'+(c.f_renewed||'')+'</td>'+
-      '<td>'+(c.homecare_client_id||c.f_homecareClientId?'<a class="homecare-link" href="https://nice-moss-053e8c60f.7.azurestaticapps.net" target="_blank">View ↗</a>':'')+'</td>';
+      '<td>'+renewedCell+'</td>'+
+      '<td>'+(c.homecare_client_id||c.f_homecareClientId?'<a class="homecare-link" href="https://app.libertybellhealth.com" target="_blank">View ↗</a>':'')+'</td>';
     tbody.appendChild(tr);
   });
+
+  // Sync the page-size selector with saved value
+  var sel=document.getElementById('clientPageSize');
+  if(sel){var savedPs=_clientPageSize===Infinity?'all':String(_clientPageSize);if(sel.value!==savedPs)sel.value=savedPs;}
 }
 function filterClients(){
   var q=document.getElementById('searchInput').value.toLowerCase();
@@ -311,12 +410,18 @@ function filterClients(){
     } else if(special){return false;}
     return true;
   });
+  // Cache the filtered set so sort/pagination don't have to re-run all filter predicates
+  _clientFilteredCache=filtered;
+  // Any filter change resets to page 1 — user asked for narrower results, show from the top
+  _clientPage=1;
   renderClientTable(filtered);
 }
 function clearFilters(){
   document.getElementById('searchInput').value='';document.getElementById('searchSSN4').value='';
   ['filterAgent','filterPlan','filterSpecial','filterRenewed','filterLeadSource'].forEach(function(id){document.getElementById(id).value='';});
-  renderClientTable(clients);
+  _clientFilteredCache=clients.slice();
+  _clientPage=1;
+  renderClientTable(_clientFilteredCache);
 }
 
 var FIELDS=['firstName','mi','lastName','relation','marital','gender','tobacco','height','weight','insured','ssn','dob','age',
