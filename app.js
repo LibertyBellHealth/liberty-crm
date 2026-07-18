@@ -259,7 +259,15 @@ function _doShowView(v){
   var nid=navMap[v];if(nid)document.getElementById(nid).classList.add('active');
   if(vid)document.querySelector('.main').scrollTop=0;
   if(v==='clients')maybeRevalidateClients();
-  if(v==='carriers')renderCarriers();
+  if(v==='carriers'){
+    // Auto-seed on the first ever visit to the Carriers page if the list is empty
+    // and the bundled master list is loaded. One-time; user can still delete anything.
+    if((!carriers||!carriers.length)&&typeof CARRIER_SEED!=='undefined'&&!localStorage.getItem('crm_carriers_seeded')){
+      seedCarriersFromMaster();
+      localStorage.setItem('crm_carriers_seeded','1');
+    }
+    renderCarriers();
+  }
   if(v==='form_edit'||v==='new')setTimeout(wireCopyableFields,50);
   if(v==='todo')renderTodos();
   if(v==='settings'){renderSettings();populateDefaultAgentSelect();}
