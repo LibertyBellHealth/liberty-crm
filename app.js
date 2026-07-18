@@ -55,7 +55,7 @@ function clearCRMStorage() {
   });
 }
 
-var msalInstance=null,spToken=null,clients=[],editingId=null,csvHeaders=[],csvData=[],currentReportData=[],carriers=[],customReportData=[];
+var msalInstance=null,spToken=null,clients=[],editingId=null,csvHeaders=[],csvData=[],currentReportData=[],carriers=[];
 
 // ── MSAL authentication ────────────────────────────────────────
 function initMSAL(){
@@ -240,7 +240,7 @@ function deleteClientAPI(id){
   return fetch(API_BASE+'/health-clients/'+id,{method:'DELETE',headers:apiHeaders()});
 }
 
-var VIEWS=['viewClients','viewNew','viewForm','viewImport','viewReports','viewCustomReports','viewCarriers','viewAdvSearch','viewTodo','viewSettings','viewRecent'];
+var VIEWS=['viewClients','viewNew','viewForm','viewImport','viewReports','viewCarriers','viewAdvSearch','viewTodo','viewSettings','viewRecent'];
 function showView(v){
   // Guard against leaving the edit form with unsaved changes
   var form=document.getElementById('viewForm');
@@ -253,8 +253,8 @@ function showView(v){
 function _doShowView(v){
   VIEWS.forEach(function(id){document.getElementById(id).style.display='none';});
   document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active');});
-  var map={clients:'viewClients',new:'viewNew',form_edit:'viewForm',import:'viewImport',reports:'viewReports',customReports:'viewCustomReports',carriers:'viewCarriers',advSearch:'viewAdvSearch',todo:'viewTodo',settings:'viewSettings',recent:'viewRecent'};
-  var navMap={clients:'navClients',new:'navNew',reports:'navReports',customReports:'navCustomReports',carriers:'navCarriers',advSearch:'navAdvSearch',todo:'navTodo',settings:'navSettings',recent:'navRecent'};
+  var map={clients:'viewClients',new:'viewNew',form_edit:'viewForm',import:'viewImport',reports:'viewReports',carriers:'viewCarriers',advSearch:'viewAdvSearch',todo:'viewTodo',settings:'viewSettings',recent:'viewRecent'};
+  var navMap={clients:'navClients',new:'navNew',reports:'navReports',carriers:'navCarriers',advSearch:'navAdvSearch',todo:'navTodo',settings:'navSettings',recent:'navRecent'};
   var vid=map[v];if(vid)document.getElementById(vid).style.display='block';
   var nid=navMap[v];if(nid)document.getElementById(nid).classList.add('active');
   if(vid)document.querySelector('.main').scrollTop=0;
@@ -1403,217 +1403,6 @@ function loadCarriersToSelect(){
 }
 
 // CUSTOM REPORT BUILDER
-function generateCustomReport(){
-  var fields=[];
-  var allFields=['name','dob','age','gender','marital','tobacco','phone','altPhone','email','email2','address','city','state','zip','county',
-    'planType','planName','carrier','level','type','deductible','premium','subsidy','totalMonthly','healthEffective','medicare','medicaid',
-    'agent','leadSource','leadDate','renewed','submittedBy',
-    'bankName','accountType','routing','account','accountName','cardType','cardNumber','cardExp',
-    'primaryEmployer','primaryIncome','spouseEmployer','spouseIncome','otherIncome1','otherIncomeAmt1','otherIncome2','otherIncomeAmt2','totalIncome',
-    'notes'];
-  allFields.forEach(function(f){
-    if(document.getElementById('rpt_'+f)&&document.getElementById('rpt_'+f).checked)fields.push(f);
-  });
-  
-  var filterPlanType=document.getElementById('rpt_filterPlanType').value;
-  var filterAgent=document.getElementById('rpt_filterAgent').value;
-  var filterRenewed=document.getElementById('rpt_filterRenewed').value;
-  var filterLeadSource=document.getElementById('rpt_filterLeadSource').value;
-  var filterCarrier=document.getElementById('rpt_filterCarrier').value;
-  var filterMedicare=document.getElementById('rpt_filterMedicare').value;
-  var filterMedicaid=document.getElementById('rpt_filterMedicaid').value;
-  
-  var data=clients.filter(function(c){
-    if(filterPlanType&&c.f_planType!==filterPlanType)return false;
-    if(filterAgent&&c.f_agent!==filterAgent)return false;
-    if(filterRenewed&&c.f_renewed!==filterRenewed)return false;
-    if(filterLeadSource&&c.f_leadSource!==filterLeadSource)return false;
-    if(filterCarrier&&c.f_planCarrier!==filterCarrier)return false;
-    if(filterMedicare==='yes'&&!c.f_hasMedicare)return false;
-    if(filterMedicare==='no'&&c.f_hasMedicare)return false;
-    if(filterMedicaid==='yes'&&!c.f_hasMedicaid)return false;
-    if(filterMedicaid==='no'&&c.f_hasMedicaid)return false;
-    return true;
-  });
-  
-  customReportData=data;
-  document.getElementById('customReportCount').textContent=data.length;
-  
-  var fieldLabels={
-    name:'Name',dob:'Birth Date',age:'Age',gender:'Gender',marital:'Marital Status',tobacco:'Tobacco',
-    phone:'Phone',altPhone:'Alt Phone',email:'Email',email2:'Email 2',address:'Address',city:'City',state:'State',zip:'Zip',county:'County',
-    planType:'Plan Type',planName:'Plan Name',carrier:'Carrier',level:'Plan Level',type:'Type (HMO/PPO)',deductible:'Deductible',
-    premium:'Premium',subsidy:'Subsidy',totalMonthly:'Total Monthly',healthEffective:'Health Effective',medicare:'Medicare',medicaid:'Medicaid',
-    agent:'Agent',leadSource:'Lead Source',leadDate:'Lead Date',renewed:'Renewed',submittedBy:'Submitted By',
-    bankName:'Bank Name',accountType:'Account Type',routing:'Routing',account:'Account Number',accountName:'Account Name',
-    cardType:'Card Type',cardNumber:'Card Number',cardExp:'Card Exp',
-    primaryEmployer:'Primary Employer',primaryIncome:'Primary Income',spouseEmployer:'Spouse Employer',spouseIncome:'Spouse Income',
-    otherIncome1:'Other Income 1',otherIncomeAmt1:'Other Income Amt 1',otherIncome2:'Other Income 2',otherIncomeAmt2:'Other Income Amt 2',
-    totalIncome:'Total Income',notes:'Notes'
-  };
-  
-  var table='<table class="client-table"><thead><tr>';
-  fields.forEach(function(f){table+='<th>'+(fieldLabels[f]||f)+'</th>';});
-  table+='</tr></thead><tbody>';
-  
-  data.forEach(function(c){
-    table+='<tr>';
-    fields.forEach(function(f){
-      var val='';
-      if(f==='name')val=(c.f_firstName||'')+' '+(c.f_lastName||'');
-      else if(f==='dob')val=c.f_dob||'';
-      else if(f==='age'){if(c.f_dob){var parts=c.f_dob.split(/[-/]/);if(parts.length>=3){var year=parts[0].length===4?parseInt(parts[0]):parseInt(parts[2]);val=new Date().getFullYear()-year;}}}
-      else if(f==='gender')val=c.f_gender||'';
-      else if(f==='marital')val=c.f_marital||'';
-      else if(f==='tobacco')val=c.f_tobacco||'';
-      else if(f==='phone')val=c.f_phone||'';
-      else if(f==='altPhone')val=c.f_altPhone||'';
-      else if(f==='email')val=c.f_email||'';
-      else if(f==='email2')val=c.f_email2||'';
-      else if(f==='address')val=c.f_resAddress||'';
-      else if(f==='city')val=c.f_resCity||'';
-      else if(f==='state')val=c.f_resSt||'';
-      else if(f==='zip')val=c.f_resZip||'';
-      else if(f==='county')val=c.f_resCounty||'';
-      else if(f==='planType')val=c.f_planType||'';
-      else if(f==='planName')val=c.f_planName||'';
-      else if(f==='carrier')val=c.f_planCarrier||'';
-      else if(f==='level')val=c.f_level||'';
-      else if(f==='type')val=c.f_type||'';
-      else if(f==='deductible')val=c.f_deductible||'';
-      else if(f==='premium')val=c.f_premium||'';
-      else if(f==='subsidy')val=c.f_subsidy||'';
-      else if(f==='totalMonthly')val=c.f_totalMonthly||'';
-      else if(f==='healthEffective')val=c.f_healthEffective||'';
-      else if(f==='medicare')val=c.f_hasMedicare?'Yes':'No';
-      else if(f==='medicaid')val=c.f_hasMedicaid?'Yes':'No';
-      else if(f==='agent')val=c.f_agent||'';
-      else if(f==='leadSource')val=c.f_leadSource||'';
-      else if(f==='leadDate')val=c.f_leadDate||'';
-      else if(f==='renewed')val=c.f_renewed||'';
-      else if(f==='submittedBy')val=c.f_submittedBy||'';
-      else if(f==='bankName')val=c.f_bankName||'';
-      else if(f==='accountType')val=c.f_accountType||'';
-      else if(f==='routing')val=c.f_routing||'';
-      else if(f==='account')val=c.f_account||'';
-      else if(f==='accountName')val=c.f_accountName||'';
-      else if(f==='cardType')val=c.f_cardType||'';
-      else if(f==='cardNumber')val=c.f_cardNumber||'';
-      else if(f==='cardExp')val=c.f_cardExp||'';
-      else if(f==='primaryEmployer')val=c.f_primaryEmployer||'';
-      else if(f==='primaryIncome')val=c.f_primaryIncome||'';
-      else if(f==='spouseEmployer')val=c.f_spouseEmployer||'';
-      else if(f==='spouseIncome')val=c.f_spouseIncome||'';
-      else if(f==='otherIncome1')val=c.f_otherIncome1||'';
-      else if(f==='otherIncomeAmt1')val=c.f_otherIncomeAmt1||'';
-      else if(f==='otherIncome2')val=c.f_otherIncome2||'';
-      else if(f==='otherIncomeAmt2')val=c.f_otherIncomeAmt2||'';
-      else if(f==='totalIncome')val=c.f_totalIncome||'';
-      else if(f==='notes')val=c.f_notes||'';
-      table+='<td>'+val+'</td>';
-    });
-    table+='</tr>';
-  });
-  table+='</tbody></table>';
-  
-  document.getElementById('customReportTable').innerHTML=table;
-  document.getElementById('customReportResults').style.display='block';
-}
-
-function exportCustomReport(){
-  if(!customReportData||customReportData.length===0){toast('Generate a report first.','error');return;}
-  
-  var fields=[];
-  var fieldLabels={
-    name:'Name',dob:'Birth Date',age:'Age',gender:'Gender',marital:'Marital Status',tobacco:'Tobacco',
-    phone:'Phone',altPhone:'Alt Phone',email:'Email',email2:'Email 2',address:'Address',city:'City',state:'State',zip:'Zip',county:'County',
-    planType:'Plan Type',planName:'Plan Name',carrier:'Carrier',level:'Plan Level',type:'Type (HMO/PPO)',deductible:'Deductible',
-    premium:'Premium',subsidy:'Subsidy',totalMonthly:'Total Monthly',healthEffective:'Health Effective',medicare:'Medicare',medicaid:'Medicaid',
-    agent:'Agent',leadSource:'Lead Source',leadDate:'Lead Date',renewed:'Renewed',submittedBy:'Submitted By',
-    bankName:'Bank Name',accountType:'Account Type',routing:'Routing',account:'Account Number',accountName:'Account Name',
-    cardType:'Card Type',cardNumber:'Card Number',cardExp:'Card Exp',
-    primaryEmployer:'Primary Employer',primaryIncome:'Primary Income',spouseEmployer:'Spouse Employer',spouseIncome:'Spouse Income',
-    otherIncome1:'Other Income 1',otherIncomeAmt1:'Other Income Amt 1',otherIncome2:'Other Income 2',otherIncomeAmt2:'Other Income Amt 2',
-    totalIncome:'Total Income',notes:'Notes'
-  };
-  
-  var allFields=['name','dob','age','gender','marital','tobacco','phone','altPhone','email','email2','address','city','state','zip','county',
-    'planType','planName','carrier','level','type','deductible','premium','subsidy','totalMonthly','healthEffective','medicare','medicaid',
-    'agent','leadSource','leadDate','renewed','submittedBy',
-    'bankName','accountType','routing','account','accountName','cardType','cardNumber','cardExp',
-    'primaryEmployer','primaryIncome','spouseEmployer','spouseIncome','otherIncome1','otherIncomeAmt1','otherIncome2','otherIncomeAmt2','totalIncome',
-    'notes'];
-    
-  var headers=[];
-  allFields.forEach(function(f){
-    if(document.getElementById('rpt_'+f)&&document.getElementById('rpt_'+f).checked){
-      fields.push(f);
-      headers.push(fieldLabels[f]||f);
-    }
-  });
-  
-  var rows=[headers];
-  customReportData.forEach(function(c){
-    var row=[];
-    fields.forEach(function(f){
-      var val='';
-      if(f==='name')val=(c.f_firstName||'')+' '+(c.f_lastName||'');
-      else if(f==='dob')val=c.f_dob||'';
-      else if(f==='age'){if(c.f_dob){var parts=c.f_dob.split(/[-/]/);if(parts.length>=3){var year=parts[0].length===4?parseInt(parts[0]):parseInt(parts[2]);val=new Date().getFullYear()-year;}}}
-      else if(f==='gender')val=c.f_gender||'';
-      else if(f==='marital')val=c.f_marital||'';
-      else if(f==='tobacco')val=c.f_tobacco||'';
-      else if(f==='phone')val=c.f_phone||'';
-      else if(f==='altPhone')val=c.f_altPhone||'';
-      else if(f==='email')val=c.f_email||'';
-      else if(f==='email2')val=c.f_email2||'';
-      else if(f==='address')val=c.f_resAddress||'';
-      else if(f==='city')val=c.f_resCity||'';
-      else if(f==='state')val=c.f_resSt||'';
-      else if(f==='zip')val=c.f_resZip||'';
-      else if(f==='county')val=c.f_resCounty||'';
-      else if(f==='planType')val=c.f_planType||'';
-      else if(f==='planName')val=c.f_planName||'';
-      else if(f==='carrier')val=c.f_planCarrier||'';
-      else if(f==='level')val=c.f_level||'';
-      else if(f==='type')val=c.f_type||'';
-      else if(f==='deductible')val=c.f_deductible||'';
-      else if(f==='premium')val=c.f_premium||'';
-      else if(f==='subsidy')val=c.f_subsidy||'';
-      else if(f==='totalMonthly')val=c.f_totalMonthly||'';
-      else if(f==='healthEffective')val=c.f_healthEffective||'';
-      else if(f==='medicare')val=c.f_hasMedicare?'Yes':'No';
-      else if(f==='medicaid')val=c.f_hasMedicaid?'Yes':'No';
-      else if(f==='agent')val=c.f_agent||'';
-      else if(f==='leadSource')val=c.f_leadSource||'';
-      else if(f==='leadDate')val=c.f_leadDate||'';
-      else if(f==='renewed')val=c.f_renewed||'';
-      else if(f==='submittedBy')val=c.f_submittedBy||'';
-      else if(f==='bankName')val=c.f_bankName||'';
-      else if(f==='accountType')val=c.f_accountType||'';
-      else if(f==='routing')val=c.f_routing||'';
-      else if(f==='account')val=c.f_account||'';
-      else if(f==='accountName')val=c.f_accountName||'';
-      else if(f==='cardType')val=c.f_cardType||'';
-      else if(f==='cardNumber')val=c.f_cardNumber||'';
-      else if(f==='cardExp')val=c.f_cardExp||'';
-      else if(f==='primaryEmployer')val=c.f_primaryEmployer||'';
-      else if(f==='primaryIncome')val=c.f_primaryIncome||'';
-      else if(f==='spouseEmployer')val=c.f_spouseEmployer||'';
-      else if(f==='spouseIncome')val=c.f_spouseIncome||'';
-      else if(f==='otherIncome1')val=c.f_otherIncome1||'';
-      else if(f==='otherIncomeAmt1')val=c.f_otherIncomeAmt1||'';
-      else if(f==='otherIncome2')val=c.f_otherIncome2||'';
-      else if(f==='otherIncomeAmt2')val=c.f_otherIncomeAmt2||'';
-      else if(f==='totalIncome')val=c.f_totalIncome||'';
-      else if(f==='notes')val=c.f_notes||'';
-      row.push(val);
-    });
-    rows.push(row);
-  });
-  
-  dlXLSX(rows,'custom_report.xlsx');
-}
 
 // ===================== HEIGHT FORMATTER =====================
 function fmtHeight(el){
@@ -2004,12 +1793,66 @@ function clearAdvSearch(){
   document.getElementById('advSearchExportBtn').style.display='none';
   _advSearchResults=[];
 }
+/* Column list — order also determines Excel column order.
+   Defaults reflect the most-used report shape. */
+var REPORT_FIELDS=[
+  ['name','Name',true],['dob','Birth Date',false],['age','Age',false],['gender','Gender',false],['marital','Marital',false],['tobacco','Tobacco',false],
+  ['phone','Phone',true],['altPhone','Alt Phone',false],['email','Email',true],['email2','Email 2',false],
+  ['address','Address',false],['city','City',false],['state','State',false],['zip','Zip',false],['county','County',false],
+  ['planType','Plan Type',true],['planName','Plan Name',false],['carrier','Carrier',false],['level','Plan Level',false],['type','Network',false],['deductible','Deductible',false],
+  ['premium','Premium',true],['subsidy','Subsidy',false],['totalMonthly','Total Monthly',false],['healthEffective','Health Effective',false],
+  ['medicare','Medicare',false],['medicaid','Medicaid',false],
+  ['agent','Agent',true],['leadSource','Lead Source',false],['leadDate','Lead Date',false],['renewed','Renewed',false],
+  ['bankName','Bank Name',false],['accountType','Account Type',false],['routing','Routing',false],['account','Account Number',false],['accountName','Name on Account',false],
+  ['cardType','Card Type',false],['cardNumber','Card Number',false],['cardExp','Card Exp',false],
+  ['primaryEmployer','Primary Employer',false],['primaryIncome','Primary Income',false],['spouseEmployer','Spouse Employer',false],['spouseIncome','Spouse Income',false],
+  ['otherIncome1','Other Income 1',false],['otherIncomeAmt1','Other Income Amt 1',false],['otherIncome2','Other Income 2',false],['otherIncomeAmt2','Other Income Amt 2',false],
+  ['totalIncome','Total Income',false],['notes','Notes',false]
+];
+function reportFieldValue(c,f){
+  switch(f){
+    case 'name':return (c.f_firstName||'')+' '+(c.f_lastName||'');
+    case 'age':return calcClientAge(c)||'';
+    case 'address':return c.f_resAddress||'';
+    case 'city':return c.f_resCity||'';
+    case 'state':return c.f_resSt||'';
+    case 'zip':return c.f_resZip||'';
+    case 'county':return c.f_resCounty||'';
+    case 'carrier':return c.f_planCarrier||'';
+    case 'medicare':return c.f_hasMedicare?'Yes':'No';
+    case 'medicaid':return c.f_hasMedicaid?'Yes':'No';
+    default:return c['f_'+f]||'';
+  }
+}
+function loadReportColumns(){
+  try{
+    var saved=JSON.parse(localStorage.getItem('crm_report_columns')||'null');
+    if(saved){REPORT_FIELDS.forEach(function(f){var el=document.getElementById('rpt_'+f[0]);if(el)el.checked=saved.indexOf(f[0])!==-1;});}
+  }catch(e){}
+}
+function saveReportColumns(){
+  var picked=REPORT_FIELDS.filter(function(f){var el=document.getElementById('rpt_'+f[0]);return el&&el.checked;}).map(function(f){return f[0];});
+  try{localStorage.setItem('crm_report_columns',JSON.stringify(picked));}catch(e){}
+}
+function toggleAdvColumns(){
+  var body=document.getElementById('advColumnsBody'),tog=document.getElementById('advColumnsToggle');
+  if(!body)return;
+  var open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  if(tog)tog.textContent=open?'(click to expand)':'(click to collapse)';
+  if(!open)loadReportColumns();
+}
+function advColumnsSelectAll(v){REPORT_FIELDS.forEach(function(f){var el=document.getElementById('rpt_'+f[0]);if(el)el.checked=v;});saveReportColumns();}
+function advColumnsResetDefault(){REPORT_FIELDS.forEach(function(f){var el=document.getElementById('rpt_'+f[0]);if(el)el.checked=f[2];});saveReportColumns();}
+document.addEventListener('change',function(e){if(e.target&&e.target.id&&e.target.id.indexOf('rpt_')===0)saveReportColumns();});
+
 function exportAdvSearchExcel(){
   if(!_advSearchResults.length)return;
-  var rows=[['Name','DOB','Age','Phone','Email','Plan Type','Carrier','Premium','Agent','State','County','ZIP','Renewed','Lead Source','App Date']];
+  var chosen=REPORT_FIELDS.filter(function(f){var el=document.getElementById('rpt_'+f[0]);return el?el.checked:f[2];});
+  if(!chosen.length){toast('Select at least one column in "Columns to Include"','error');return;}
+  var rows=[chosen.map(function(f){return f[1];})];
   _advSearchResults.forEach(function(c){
-    var age=calcClientAge(c);
-    rows.push([(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_dob||'',age||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planCarrier||'',c.f_premium||'',c.f_agent||'',c.f_resSt||'',c.f_resCounty||'',c.f_resZip||'',c.f_renewed||'',c.f_leadSource||'',c.f_date||'']);
+    rows.push(chosen.map(function(f){return reportFieldValue(c,f[0]);}));
   });
   dlXLSX(rows,'advanced_search_results.xlsx');
 }
@@ -2162,13 +2005,10 @@ function applySettingsToDropdowns(){
   function repopSel(id,items,blank){var sel=document.getElementById(id);if(!sel||sel.tagName!=='SELECT')return;var cur=sel.value;sel.innerHTML=blank||'';items.forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;sel.appendChild(o);});sel.value=cur;}
   function repopDatalist(id,items){var dl=document.getElementById(id);if(!dl)return;dl.innerHTML='';items.forEach(function(v){var o=document.createElement('option');o.value=v;dl.appendChild(o);});}
   repopSel('f_agent',_settingsAgents,'');
-  repopSel('rpt_filterAgent',_settingsAgents,'<option value="">All</option>');
   repopDatalist('leadSourceOptions',_settingsLeadSources);
   refreshReferrerDatalist();
-  repopSel('rpt_filterLeadSource',_settingsLeadSources,'<option value="">All</option>');
   repopSel('as_leadSource',_settingsLeadSources,'<option value="">All</option>');
   repopSel('f_renewed',_settingsRenewals,'<option value=""></option>');
-  repopSel('rpt_filterRenewed',_settingsRenewals,'<option value="">All</option>');
   repopSel('as_renewed',_settingsRenewals,'<option value="">All</option>');
   repopSel('filterAgent',_settingsAgents,'<option value="">All Agents</option>');
   repopSel('filterLeadSource',_settingsLeadSources,'<option value="">All Lead Sources</option>');

@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718f">
+<link rel="stylesheet" href="styles.css?v=20260718g">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -33,7 +33,6 @@
     <button class="nav-btn active" id="navClients" onclick="showView('clients')">Clients</button>
     <button class="nav-btn" id="navNew" onclick="showView('new')">+ New Client</button>
     <button class="nav-btn" id="navReports" onclick="showView('reports')">Reports</button>
-    <button class="nav-btn" id="navCustomReports" onclick="showView('customReports')">Custom Reports</button>
     <button class="nav-btn" id="navRecent" onclick="showView('recent')">Recent Records</button>
     <button class="nav-btn" id="navCarriers" onclick="showView('carriers')">Carriers</button>
     <button class="nav-btn" id="navAdvSearch" onclick="showView('advSearch')">Advanced Search</button>
@@ -487,110 +486,7 @@
     </div>
 
     <!-- CUSTOM REPORTS VIEW -->
-    <div id="viewCustomReports" class="view-panel" style="display:none;">
-      <div class="topbar"><h2>Custom Report Builder</h2></div>
-      <div style="padding:16px;">
-        <div class="form-card">
-          <div class="form-section">
-            <div class="form-section-title">Personal Info</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_name" checked> Name</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_dob"> Birth Date</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_age"> Age</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_gender"> Gender</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_marital"> Marital Status</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_tobacco"> Tobacco</label>
-            </div>
-            
-            <div class="form-section-title">Contact Info</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_phone" checked> Phone</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_altPhone"> Alt Phone</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_email" checked> Email</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_email2"> Email 2</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_address"> Address</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_city"> City</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_state"> State</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_zip"> Zip</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_county"> County</label>
-            </div>
-            
-            <div class="form-section-title">Plan Info</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_planType" checked> Plan Type</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_planName"> Plan Name</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_carrier"> Carrier</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_level"> Plan Level</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_type"> Plan Type (HMO/PPO)</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_deductible"> Deductible</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_premium" checked> Premium</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_subsidy"> Subsidy</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_totalMonthly"> Total Monthly</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_healthEffective"> Health Effective</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_medicare"> Medicare</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_medicaid"> Medicaid</label>
-            </div>
-            
-            <div class="form-section-title">Agent & Lead Info</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_agent" checked> Agent</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_leadSource"> Lead Source</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_leadDate"> Lead Date</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_renewed"> Renewed</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_submittedBy"> Submitted By</label>
-            </div>
-            
-            <div class="form-section-title">Payment Info</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_bankName"> Bank Name</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_accountType"> Account Type</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_routing"> Routing Number</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_account"> Account Number</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_accountName"> Primary Name on Account</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_cardType"> Card Type</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_cardNumber"> Card Number</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_cardExp"> Card Expiration</label>
-            </div>
-            
-            <div class="form-section-title">Income Info</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_primaryEmployer"> Primary Employer</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_primaryIncome"> Primary Income</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_spouseEmployer"> Spouse Employer</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_spouseIncome"> Spouse Income</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_otherIncome1"> Other Income Source 1</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_otherIncomeAmt1"> Other Income 1</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_otherIncome2"> Other Income Source 2</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_otherIncomeAmt2"> Other Income 2</label>
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_totalIncome"> Total Income</label>
-            </div>
-            
-            <div class="form-section-title">Additional Info</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
-              <label style="font-size:11px;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="rpt_notes"> Notes</label>
-            </div>
-            
-            <div class="form-section-title">Filter By</div>
-            <div class="fg g4" style="margin-bottom:16px;">
-              <div class="field"><label>Plan Type</label><select id="rpt_filterPlanType"><option value="">All</option><option>ACA/Marketplace</option><option>Medicare</option><option>Medicaid</option><option>Short Term</option></select></div>
-              <div class="field"><label>Agent</label><select id="rpt_filterAgent"><option value="">All</option><option>Thomas Jaboro</option><option>Paul Jaboro Jr.</option></select></div>
-              <div class="field"><label>Renewed Status</label><select id="rpt_filterRenewed"><option value="">All</option><option>2026 Renewed</option><option>Not Renewed</option></select></div>
-              <div class="field"><label>Lead Source</label><select id="rpt_filterLeadSource"><option value="">All</option></select></div>
-              <div class="field"><label>Carrier</label><select id="rpt_filterCarrier"><option value="">All</option></select></div>
-              <div class="field"><label>Has Medicare</label><select id="rpt_filterMedicare"><option value="">All</option><option value="yes">Yes</option><option value="no">No</option></select></div>
-              <div class="field"><label>Has Medicaid</label><select id="rpt_filterMedicaid"><option value="">All</option><option value="yes">Yes</option><option value="no">No</option></select></div>
-            </div>
-            
-            <button class="btn btn-blue" onclick="generateCustomReport()">Generate Report</button>
-            <button class="btn" onclick="exportCustomReport()">&#128202; Export to Excel</button>
-          </div>
-          <div class="form-section" id="customReportResults" style="display:none;">
-            <div class="form-section-title">Report Results (<span id="customReportCount">0</span> records)</div>
-            <div style="overflow-x:auto;">
-              <div id="customReportTable"></div>
-            </div>
-          </div>
-        </div>
+    
       </div>
     </div>
 
@@ -694,6 +590,82 @@
               <div class="field"><label>Has Medicare</label><select id="as_medicare"><option value="">Any</option><option value="yes">Yes</option><option value="no">No</option></select></div>
               <div class="field"><label>Has Medicaid</label><select id="as_medicaid"><option value="">Any</option><option value="yes">Yes</option><option value="no">No</option></select></div>
               <div class="field"><label>Medication (contains)</label><input id="as_medication" placeholder="e.g. Metformin"></div>
+            </div>
+          </div>
+                    <div class="form-section" id="advSearchColumns">
+            <div class="form-section-title" style="cursor:pointer;user-select:none;" onclick="toggleAdvColumns()">
+              Columns to Include in Excel Export <span id="advColumnsToggle" style="font-size:11px;font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0;">(click to expand)</span>
+            </div>
+            <div id="advColumnsBody" style="display:none;">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Pick which fields appear as columns when you Export to Excel. Selection is saved to this device.</div>
+              <div class="acg-group"><div class="acg-title">Personal</div>
+                <label><input type="checkbox" id="rpt_name" checked> Name</label>
+                <label><input type="checkbox" id="rpt_dob"> Birth Date</label>
+                <label><input type="checkbox" id="rpt_age"> Age</label>
+                <label><input type="checkbox" id="rpt_gender"> Gender</label>
+                <label><input type="checkbox" id="rpt_marital"> Marital</label>
+                <label><input type="checkbox" id="rpt_tobacco"> Tobacco</label>
+              </div>
+              <div class="acg-group"><div class="acg-title">Contact & Location</div>
+                <label><input type="checkbox" id="rpt_phone" checked> Phone</label>
+                <label><input type="checkbox" id="rpt_altPhone"> Alt Phone</label>
+                <label><input type="checkbox" id="rpt_email" checked> Email</label>
+                <label><input type="checkbox" id="rpt_email2"> Email 2</label>
+                <label><input type="checkbox" id="rpt_address"> Address</label>
+                <label><input type="checkbox" id="rpt_city"> City</label>
+                <label><input type="checkbox" id="rpt_state"> State</label>
+                <label><input type="checkbox" id="rpt_zip"> Zip</label>
+                <label><input type="checkbox" id="rpt_county"> County</label>
+              </div>
+              <div class="acg-group"><div class="acg-title">Plan</div>
+                <label><input type="checkbox" id="rpt_planType" checked> Plan Type</label>
+                <label><input type="checkbox" id="rpt_planName"> Plan Name</label>
+                <label><input type="checkbox" id="rpt_carrier"> Carrier</label>
+                <label><input type="checkbox" id="rpt_level"> Plan Level</label>
+                <label><input type="checkbox" id="rpt_type"> Network (HMO/PPO)</label>
+                <label><input type="checkbox" id="rpt_deductible"> Deductible</label>
+                <label><input type="checkbox" id="rpt_premium" checked> Premium</label>
+                <label><input type="checkbox" id="rpt_subsidy"> Subsidy</label>
+                <label><input type="checkbox" id="rpt_totalMonthly"> Total Monthly</label>
+                <label><input type="checkbox" id="rpt_healthEffective"> Health Effective</label>
+                <label><input type="checkbox" id="rpt_medicare"> Medicare (Y/N)</label>
+                <label><input type="checkbox" id="rpt_medicaid"> Medicaid (Y/N)</label>
+              </div>
+              <div class="acg-group"><div class="acg-title">Agent & Lead</div>
+                <label><input type="checkbox" id="rpt_agent" checked> Agent</label>
+                <label><input type="checkbox" id="rpt_leadSource"> Lead Source</label>
+                <label><input type="checkbox" id="rpt_leadDate"> Lead Date</label>
+                <label><input type="checkbox" id="rpt_renewed"> Renewed</label>
+              </div>
+              <div class="acg-group"><div class="acg-title">Payment</div>
+                <label><input type="checkbox" id="rpt_bankName"> Bank Name</label>
+                <label><input type="checkbox" id="rpt_accountType"> Account Type</label>
+                <label><input type="checkbox" id="rpt_routing"> Routing</label>
+                <label><input type="checkbox" id="rpt_account"> Account Number</label>
+                <label><input type="checkbox" id="rpt_accountName"> Name on Account</label>
+                <label><input type="checkbox" id="rpt_cardType"> Card Type</label>
+                <label><input type="checkbox" id="rpt_cardNumber"> Card Number</label>
+                <label><input type="checkbox" id="rpt_cardExp"> Card Exp</label>
+              </div>
+              <div class="acg-group"><div class="acg-title">Income</div>
+                <label><input type="checkbox" id="rpt_primaryEmployer"> Primary Employer</label>
+                <label><input type="checkbox" id="rpt_primaryIncome"> Primary Income</label>
+                <label><input type="checkbox" id="rpt_spouseEmployer"> Spouse Employer</label>
+                <label><input type="checkbox" id="rpt_spouseIncome"> Spouse Income</label>
+                <label><input type="checkbox" id="rpt_otherIncome1"> Other Income 1</label>
+                <label><input type="checkbox" id="rpt_otherIncomeAmt1"> Other Income Amt 1</label>
+                <label><input type="checkbox" id="rpt_otherIncome2"> Other Income 2</label>
+                <label><input type="checkbox" id="rpt_otherIncomeAmt2"> Other Income Amt 2</label>
+                <label><input type="checkbox" id="rpt_totalIncome"> Total Income</label>
+              </div>
+              <div class="acg-group"><div class="acg-title">Other</div>
+                <label><input type="checkbox" id="rpt_notes"> Notes</label>
+              </div>
+              <div style="margin-top:10px;display:flex;gap:8px;">
+                <button type="button" class="btn" style="font-size:11px;padding:5px 10px;" onclick="advColumnsSelectAll(true)">Select All</button>
+                <button type="button" class="btn" style="font-size:11px;padding:5px 10px;" onclick="advColumnsSelectAll(false)">Clear All</button>
+                <button type="button" class="btn" style="font-size:11px;padding:5px 10px;" onclick="advColumnsResetDefault()">Reset to Default</button>
+              </div>
             </div>
           </div>
           <div class="form-section" style="background:#f9fafb;">
@@ -855,8 +827,8 @@
   </div>
 </div>
 
-<script src="routing-lookup.js?v=20260718f"></script>
-<script src="app.js?v=20260718f"></script>
+<script src="routing-lookup.js?v=20260718g"></script>
+<script src="app.js?v=20260718g"></script>
 
 </body>
 </html>

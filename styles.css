@@ -74,6 +74,12 @@
 .reveal-wrap .icon-btn{position:absolute;right:2px;top:50%;transform:translateY(-50%);margin:0;background:transparent;}
 .reveal-wrap .icon-btn:hover{background:var(--surface-hover);}
 
+/* Column picker on Advanced Search — grouped checkbox lists */
+.acg-group{margin-bottom:12px;}
+.acg-group .acg-title{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;}
+.acg-group label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text);margin:2px 14px 4px 0;cursor:pointer;}
+.acg-group label input{margin:0;cursor:pointer;}
+
 /* Hover-only copy button attached to every text field on the client edit form */
 .field-copyable{position:relative;}
 .field-copyable .copy-hover-btn{
