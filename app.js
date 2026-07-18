@@ -218,6 +218,8 @@ function loadClients(){
   .then(function(r){return r.json();})
   .then(function(data){
     clients=data.map(function(row){return dbRowToClient(row);});
+    // Seed the filtered-results cache so sort/pagination work before any filter is applied
+    _clientFilteredCache=clients.slice();
     renderClientTable(clients);renderReportCards();
   }).catch(function(e){console.error('Load error:',e);});
 }
