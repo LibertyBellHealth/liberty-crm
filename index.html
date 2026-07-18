@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718c">
+<link rel="stylesheet" href="styles.css?v=20260718d">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -600,24 +600,10 @@
     <div id="viewCarriers" class="view-panel" style="display:none;">
       <div class="topbar">
         <h2>Carrier Management</h2>
-        <button class="btn" onclick="seedCarriersFromMaster()">Seed from Master List</button>
         <button class="btn btn-blue" onclick="addCarrier()">+ Add Carrier</button>
       </div>
       <div style="padding:16px;">
         <div class="form-card">
-          <div class="form-section" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding-bottom:0;border-bottom:none;">
-            <input id="carrierSearch" placeholder="Search carrier name..." oninput="renderCarriers()" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:6px;font-size:13px;width:240px;">
-            <select id="carrierFilterState" onchange="renderCarriers()" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:6px;font-size:13px;">
-              <option value="">All States</option>
-            </select>
-            <select id="carrierFilterType" onchange="renderCarriers()" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:6px;font-size:13px;">
-              <option value="">All Product Types</option>
-              <option value="ACA">ACA</option>
-              <option value="MA">Medicare Advantage</option>
-              <option value="Medigap">Medigap</option>
-            </select>
-            <span id="carrierCount" style="color:var(--text-muted);font-size:12px;margin-left:auto;"></span>
-          </div>
           <div class="form-section">
             <div id="carrierList"></div>
           </div>
@@ -871,9 +857,8 @@
   </div>
 </div>
 
-<script src="routing-lookup.js?v=20260718c"></script>
-<script src="carriers-seed.js?v=20260718c"></script>
-<script src="app.js?v=20260718c"></script>
+<script src="routing-lookup.js?v=20260718d"></script>
+<script src="app.js?v=20260718d"></script>
 
 </body>
 </html>
