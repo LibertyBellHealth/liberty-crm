@@ -1004,7 +1004,7 @@ function getReferrerCounts(){
   });
   return Object.keys(counts).map(function(n){return{name:n,count:counts[n]};}).sort(function(a,b){return b.count-a.count;});
 }
-function updateMemberCount(){document.getElementById('memberCount').textContent=document.querySelectorAll('.member-row-data').length;}
+function updateMemberCount(){document.getElementById('memberCount').textContent=document.querySelectorAll('.member-row-data').length+1;}
 function populateCountySel(sel,counties,savedVal){
   sel.innerHTML='';
   if(!counties||!counties.length){var o=document.createElement('option');o.value='';o.textContent='';sel.appendChild(o);return;}
@@ -1027,23 +1027,40 @@ function lookupZip(el,prefix){
     if(!data.places||!data.places.length)return;
     document.getElementById('f_'+prefix+'City').value=data.places[0]['place name']||'';
     document.getElementById('f_'+prefix+'St').value=data.places[0]['state abbreviation']||'';
-    var lat=data.places[0].latitude;var lon=data.places[0].longitude;
-    if(lat&&lon){fetchCountyByLatLon(lat,lon,prefix,null);}
+    fetchCountiesForPlaces(data.places,prefix,null);
   }).catch(function(){});
 }
 function restoreCounty(zip,prefix,saved){
   var z=(zip||'').replace(/\D/g,'');if(z.length!==5)return;
   fetch('https://api.zippopotam.us/us/'+z).then(function(r){return r.json();}).then(function(data){
     if(!data.places||!data.places.length)return;
-    var lat=data.places[0].latitude;var lon=data.places[0].longitude;
-    if(lat&&lon){fetchCountyByLatLon(lat,lon,prefix,saved);}
+    fetchCountiesForPlaces(data.places,prefix,saved);
   }).catch(function(){});
+}
+/* Query FCC for EVERY place in a zip (a single zip can span multiple counties),
+   dedupe, then present all as options. If only one county is found, it's picked;
+   otherwise the user gets a proper dropdown to choose. */
+function fetchCountiesForPlaces(places,prefix,saved){
+  var sel=document.getElementById('f_'+prefix+'County');if(!sel)return;
+  Promise.all(places.map(function(p){
+    if(!p.latitude||!p.longitude)return Promise.resolve([]);
+    return fetch('https://geo.fcc.gov/api/census/area?lat='+p.latitude+'&lon='+p.longitude+'&format=json')
+      .then(function(r){return r.json();})
+      .then(function(d){var out=[];if(d&&d.results){d.results.forEach(function(r){if(r.county_name)out.push(r.county_name);});}return out;})
+      .catch(function(){return [];});
+  })).then(function(arrs){
+    var seen={},counties=[];
+    arrs.forEach(function(a){a.forEach(function(c){if(!seen[c]){seen[c]=true;counties.push(c);}});});
+    counties.sort();
+    if(counties.length)populateCountySel(sel,counties,saved);
+    else sel.innerHTML='<option value=""></option>';
+  });
 }
 
 function addMemberRow(data){
   var uid='m'+Date.now()+Math.floor(Math.random()*1000);
   var div=document.createElement('div');div.className='member-row-data';
-  div.style.cssText='display:grid;grid-template-columns:1.1fr 0.25fr 1.1fr 0.75fr 0.5fr 0.5fr 0.5fr 0.4fr 0.4fr 0.7fr 0.4fr 1.2fr 0.55fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
+  div.style.cssText='display:grid;grid-template-columns:1.4fr 0.3fr 1.4fr 0.7fr 0.5fr 0.5fr 0.55fr 0.5fr 0.5fr 0.85fr 0.45fr 1.2fr 0.6fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
   div.innerHTML=
     mk('First Name','firstName',data)+mkS('MI','mi',data)+mk('Last Name','lastName',data)+
     mkSel('Relation','relation',['','Spouse','Child','Mother','Father','Other'],data)+
@@ -1052,26 +1069,26 @@ function addMemberRow(data){
     mkSel('Tobacco','tobacco',['','Yes','No'],data)+
     mkSmall('Height','height',data)+mkSmall('Weight','weight',data)+
     '<div class="field"><label style="font-size:9px;">DOB</label><input type="date" data-field="dob" id="'+uid+'_dob" value="'+(data&&data.dob||'')+'" onchange="calcMemberAge(this,\''+uid+'_age\')" style="font-size:11px;padding:4px 5px;"></div>'+
-    '<div class="field"><label style="font-size:9px;">Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;font-size:11px;padding:4px 5px;max-width:45px;" value="'+(data&&data.age||'')+'"></div>'+
-    '<div class="field"><label style="font-size:9px;">SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11" style="font-size:11px;padding:4px 5px;width:100%;"></div>'+
+    '<div class="field"><label>Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;" value="'+(data&&data.age||'')+'"></div>'+
+    '<div class="field"><label>SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11" style="width:100%;"></div>'+
     mkSel('Insured','insured',['','Yes','No'],data)+
     '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this household member?\',updateMemberCount)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   document.getElementById('membersContainer').appendChild(div);
   updateMemberCount();
 }
-function mk(lbl,field,data){return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'" style="font-size:11px;padding:4px 5px;"></div>';}
-function mkS(lbl,field,data){return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'" maxlength="1" style="font-size:11px;padding:4px 5px;max-width:40px;"></div>';}
+function mk(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"></div>';}
+function mkS(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'" maxlength="1"></div>';}
 function mkSmall(lbl,field,data){
   var extra='';
   if(field==='height')extra=' oninput="fmtHeight(this)"';
-  return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"'+extra+' style="font-size:11px;padding:4px 5px;max-width:50px;"></div>';
+  return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"'+extra+'></div>';
 }
-function mkC(lbl,field,data){return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'" style="font-size:11px;padding:4px 5px;"></div>';}
-function mkSelC(lbl,field,opts,data){var val=data&&data[field]||'';var options=opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('');return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><select data-field="'+field+'" style="font-size:11px;padding:4px 5px;">'+options+'</select></div>';}
+function mkC(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"></div>';}
+function mkSelC(lbl,field,opts,data){var val=data&&data[field]||'';var options=opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('');return '<div class="field"><label>'+lbl+'</label><select data-field="'+field+'">'+options+'</select></div>';}
 function mkSel(lbl,field,opts,data){
   var val=data&&data[field]||'';
   var options=opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('');
-  return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><select data-field="'+field+'" style="font-size:11px;padding:4px 5px;">'+options+'</select></div>';
+  return '<div class="field"><label>'+lbl+'</label><select data-field="'+field+'">'+options+'</select></div>';
 }
 function addDoctorRow(data){
   var div=document.createElement('div');div.className='doctor-row-data';
