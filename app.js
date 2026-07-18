@@ -1404,17 +1404,31 @@ function fetchCountyByLatLon(lat,lon,prefix,savedVal){
     else{sel.innerHTML='<option value=""></option>';}
   }).catch(function(){sel.innerHTML='<option value=""></option>';});
 }
+/* Resolve a zip to its county list, preferring the bundled ZIP_COUNTIES dataset
+   (accurate multi-county coverage), falling back to FCC lat/lon lookup when the
+   zip isn't in the bundle (~9k unlisted zips like some PO-Box-only). */
+function bundledCounties(zip){
+  if(typeof ZIP_COUNTIES==='undefined')return null;
+  var v=ZIP_COUNTIES[zip];if(!v)return null;
+  return v.split('|').map(function(s){return s.trim();}).filter(Boolean);
+}
 function lookupZip(el,prefix){
   var zip=el.value.replace(/\D/g,'');if(zip.length!==5)return;
   fetch('https://api.zippopotam.us/us/'+zip).then(function(r){return r.json();}).then(function(data){
     if(!data.places||!data.places.length)return;
     document.getElementById('f_'+prefix+'City').value=data.places[0]['place name']||'';
     document.getElementById('f_'+prefix+'St').value=data.places[0]['state abbreviation']||'';
-    fetchCountiesForPlaces(data.places,prefix,null);
+    var sel=document.getElementById('f_'+prefix+'County');
+    var bundled=bundledCounties(zip);
+    if(bundled&&bundled.length&&sel){populateCountySel(sel,bundled,null);}
+    else{fetchCountiesForPlaces(data.places,prefix,null);}
   }).catch(function(){});
 }
 function restoreCounty(zip,prefix,saved){
   var z=(zip||'').replace(/\D/g,'');if(z.length!==5)return;
+  var sel=document.getElementById('f_'+prefix+'County');
+  var bundled=bundledCounties(z);
+  if(bundled&&bundled.length&&sel){populateCountySel(sel,bundled,saved);return;}
   fetch('https://api.zippopotam.us/us/'+z).then(function(r){return r.json();}).then(function(data){
     if(!data.places||!data.places.length)return;
     fetchCountiesForPlaces(data.places,prefix,saved);
