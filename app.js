@@ -17,11 +17,27 @@ var SP_CLIENT_ID = '63828fd5-e676-4dd7-bfaa-0055fdb9b3c7';
 var SP_TENANT_ID = '12be0d3c-3e63-429f-bf46-1a2f746aa25f';
 var REDIRECT_URI  = 'https://polite-pebble-039f4a010.7.azurestaticapps.net';
 
+// Health CRM is Paul + Tommy only. Rob has Home Care access but must NOT reach
+// Health PHI — the backend enforces this too via checkApiKey(req,'health').
 var ALLOWED_USERS = [
   'tommy@mybellcare.com',
-  'paul@mybellcare.com',
-  'rob@mybellcare.com'
+  'paul@mybellcare.com'
 ];
+
+/* HTML-escape for interpolating client data into markup. Covers element text AND
+   quoted attribute values. Client data reaches the DOM from paste-import and CSV,
+   so it is never safe to concatenate raw. Use textContent where practical instead. */
+function escHtml(v){
+  return String(v==null?'':v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+/* For a value going inside a single-quoted JS string inside an HTML attribute
+   (e.g. onclick="f('...')"). Backslash MUST be escaped first or the quote escape
+   can be neutralised. Prefer data-* attributes + listeners over this. */
+function escJsAttr(v){
+  return escHtml(String(v==null?'':v).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+}
 
 function aiTrack(name, props) {
   try {
@@ -669,21 +685,21 @@ function renderClientTable(data){
     if(c.f_planType==='Medicare')bc='badge-green';
     else if(c.f_planType==='Medicaid')bc='badge-orange';
     else if(c.f_planType==='Short Term')bc='badge-red';
-    var badge=c.f_planType?'<span class="badge '+bc+'">'+c.f_planType+'</span>':'';
+    var badge=c.f_planType?'<span class="badge '+bc+'">'+escHtml(c.f_planType)+'</span>':'';
     var phone=c.f_phone||'';var email=c.f_email||'';
     // Renewed status → dot + plain text (matches Home Care's status pattern)
     var renewedRaw=(c.f_renewed||'').trim();
     var renewedDotClass=renewedRaw==='2026 Renewed'||renewedRaw.indexOf('Renewed')===0?'renewed':(renewedRaw==='Not Renewed'?'notrenewed':'');
-    var renewedCell=renewedRaw?'<span class="status-inline"><span class="status-dot '+renewedDotClass+'"></span>'+renewedRaw+'</span>':'';
-    tr.innerHTML='<td><input type="checkbox" class="row-cb" data-id="'+c._id+'" onchange="updateBulkBtn()"></td>'+
-      '<td><span class="client-name-link link-plain" onclick="editClient(\''+c._id+'\')">'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</span></td>'+
-      '<td>'+(c.f_dob||'')+'</td>'+
-      '<td>'+phone+(phone?'<a href="tel:'+phone+'" class="icon-btn" title="Call">'+SVG_PHONE+'</a><button class="icon-btn" onclick="copyText(\''+phone.replace(/'/g,"\\'")+'\',this)" title="Copy">'+SVG_COPY+'</button>':'')+'</td>'+
-      '<td>'+email+(email?'<a href="mailto:'+email+'" class="icon-btn" title="Email">'+SVG_MAIL+'</a><button class="icon-btn" onclick="copyText(\''+email.replace(/'/g,"\\'")+'\',this)" title="Copy">'+SVG_COPY+'</button>':'')+'</td>'+
+    var renewedCell=renewedRaw?'<span class="status-inline"><span class="status-dot '+renewedDotClass+'"></span>'+escHtml(renewedRaw)+'</span>':'';
+    tr.innerHTML='<td><input type="checkbox" class="row-cb" data-id="'+escHtml(c._id)+'" onchange="updateBulkBtn()"></td>'+
+      '<td><span class="client-name-link link-plain" onclick="editClient(\''+escJsAttr(c._id)+'\')">'+escHtml(((c.f_firstName||'')+' '+(c.f_lastName||'')).trim())+'</span></td>'+
+      '<td>'+escHtml(c.f_dob)+'</td>'+
+      '<td>'+escHtml(phone)+(phone?'<a href="tel:'+escHtml(phone)+'" class="icon-btn" title="Call">'+SVG_PHONE+'</a><button class="icon-btn" onclick="copyText(\''+escJsAttr(phone)+'\',this)" title="Copy">'+SVG_COPY+'</button>':'')+'</td>'+
+      '<td>'+escHtml(email)+(email?'<a href="mailto:'+escHtml(email)+'" class="icon-btn" title="Email">'+SVG_MAIL+'</a><button class="icon-btn" onclick="copyText(\''+escJsAttr(email)+'\',this)" title="Copy">'+SVG_COPY+'</button>':'')+'</td>'+
       '<td>'+badge+'</td>'+
-      '<td>'+(c.f_planName||'')+'</td>'+
-      '<td>'+(c.f_premium?'$'+c.f_premium:'')+'</td>'+
-      '<td>'+(c.f_agent||'')+'</td>'+
+      '<td>'+escHtml(c.f_planName)+'</td>'+
+      '<td>'+(c.f_premium?'$'+escHtml(c.f_premium):'')+'</td>'+
+      '<td>'+escHtml(c.f_agent)+'</td>'+
       '<td>'+renewedCell+'</td>'+
 '';
     tbody.appendChild(tr);
@@ -892,7 +908,7 @@ function setFormData(data){
 function editClient(id){
   var c=clients.find(function(x){return String(x._id)===String(id);});
   if(!c){toast('Could not find client record. Please refresh and try again.','error');return;}
-  aiTrack('ClientRecordOpened',{clientId:id,clientName:(c.f_firstName||'')+' '+(c.f_lastName||'')});
+  aiTrack('ClientRecordOpened',{clientId:id}); // no PHI in telemetry — id only
   trackRecentRecord(id,c);
   // Deep-link URL so bookmarking / copy-link opens this client next time
   try{if(('#/client/'+id)!==window.location.hash)window.location.hash='/client/'+id;}catch(e){}
@@ -921,7 +937,7 @@ function saveClient(onSuccess){
   if(!data.f_firstName&&!data.f_lastName){toast('Please enter at least a first or last name.','error');return;}
   var isNew=!editingId;
   saveClientAPI(data,editingId).then(function(){
-    aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientName:(data.f_firstName||'')+' '+(data.f_lastName||''),clientId:editingId||'new'});
+    aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientId:editingId||'new'}); // no PHI in telemetry
     clearFormDirty();
     loadClients();
     if(typeof onSuccess==='function')onSuccess();
@@ -935,7 +951,7 @@ function deleteClient(){
   var name=c?((c.f_firstName||'')+' '+(c.f_lastName||'')).trim():'this client';
   showConfirm('Delete '+(name||'this client')+'? This cannot be undone.',function(){
     deleteClientAPI(editingId).then(function(){
-      aiTrack('ClientDeleted',{clientId:editingId,clientName:name||editingId});
+      aiTrack('ClientDeleted',{clientId:editingId}); // no PHI in telemetry
       loadClients();showView('clients');
     });
   },{title:'Delete Client',okText:'Delete'});
@@ -1004,8 +1020,8 @@ function addOtherIncomeRow(data){
   var row=document.createElement('div');
   row.className='oi-row fg';
   row.style.cssText='grid-template-columns:2fr 0.8fr 30px;gap:8px;margin-bottom:8px;align-items:end;';
-  row.innerHTML='<div class="field"><label>Other Income Source</label><input class="oi-src" value="'+(data.source||'').replace(/"/g,'&quot;')+'"></div>'+
-    '<div class="field"><label>Income</label><input class="oi-amt" placeholder="$" value="'+(data.amount||'').replace(/"/g,'&quot;')+'" oninput="fmtMoney(this);calcTotalIncome()" onblur="fmtMoneyBlur(this);calcTotalIncome()"></div>'+
+  row.innerHTML='<div class="field"><label>Other Income Source</label><input class="oi-src" value="'+escHtml(data.source||'')+'"></div>'+
+    '<div class="field"><label>Income</label><input class="oi-amt" placeholder="$" value="'+escHtml(data.amount||'')+'" oninput="fmtMoney(this);calcTotalIncome()" onblur="fmtMoneyBlur(this);calcTotalIncome()"></div>'+
     '<button type="button" class="icon-btn" onclick="removeOtherIncomeRow(this)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   c.appendChild(row);
   updateOtherIncomeAddBtn();
@@ -1336,14 +1352,13 @@ function referrerAC(el){
   var exact=idx[qLow];
   var html='';
   matches.slice(0,8).forEach(function(e){
-    var canonical=e.name.replace(/"/g,'&quot;');
-    html+='<div onmousedown="pickReferrer(\''+canonical.replace(/'/g,"\\'")+'\')" style="display:flex;justify-content:space-between;">'+
-      '<span>'+e.name+'</span>'+
+    html+='<div onmousedown="pickReferrer(\''+escJsAttr(e.name)+'\')" style="display:flex;justify-content:space-between;">'+
+      '<span>'+escHtml(e.name)+'</span>'+
       '<span style="color:var(--text-muted);font-size:11px;">'+e.count+' referral'+(e.count===1?'':'s')+'</span></div>';
   });
   if(q&&!exact){
-    html+='<div onmousedown="addReferrer(\''+q.replace(/'/g,"\\'")+'\')" style="border-top:1px solid var(--border);color:var(--accent);font-weight:600;">'+
-      '+ Add new referrer: "'+q+'"</div>';
+    html+='<div onmousedown="addReferrer(\''+escJsAttr(q)+'\')" style="border-top:1px solid var(--border);color:var(--accent);font-weight:600;">'+
+      '+ Add new referrer: "'+escHtml(q)+'"</div>';
   } else if(!q&&!entries.length){
     html='<div style="color:var(--text-muted);cursor:default;">Type a name to add your first referrer</div>';
   }
@@ -1466,24 +1481,24 @@ function addMemberRow(data){
     mkSel('Married','married',['','Yes','No'],data)+
     mkSel('Gender','gender',['','M','F'],data)+
     mkSel('Tobacco','tobacco',['','Yes','No'],data)+
-    '<div class="field"><label>Height</label><input data-field="height" value="'+(data&&data.height||'')+'" placeholder="5\'10&quot;" oninput="fmtHeight(this)"></div>'+
-    '<div class="field"><label>Weight</label><input data-field="weight" value="'+(data&&data.weight||'')+'" placeholder="lbs"></div>'+
-    '<div class="field"><label>DOB</label><input type="date" data-field="dob" id="'+uid+'_dob" value="'+(data&&data.dob||'')+'" onchange="calcMemberAge(this,\''+uid+'_age\')"></div>'+
-    '<div class="field"><label>Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;" value="'+(data&&data.age||'')+'"></div>'+
-    '<div class="field"><label>SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11"></div>'+
+    '<div class="field"><label>Height</label><input data-field="height" value="'+escHtml(data&&data.height||'')+'" placeholder="5\'10&quot;" oninput="fmtHeight(this)"></div>'+
+    '<div class="field"><label>Weight</label><input data-field="weight" value="'+escHtml(data&&data.weight||'')+'" placeholder="lbs"></div>'+
+    '<div class="field"><label>DOB</label><input type="date" data-field="dob" id="'+uid+'_dob" value="'+escHtml(data&&data.dob||'')+'" onchange="calcMemberAge(this,\''+uid+'_age\')"></div>'+
+    '<div class="field"><label>Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;" value="'+escHtml(data&&data.age||'')+'"></div>'+
+    '<div class="field"><label>SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+escHtml(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11"></div>'+
     mkSel('Insured','insured',['','Yes','No'],data)+
     '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this household member?\',updateMemberCount)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   document.getElementById('membersContainer').appendChild(div);
   updateMemberCount();
 }
-function mk(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"></div>';}
-function mkS(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'" maxlength="1"></div>';}
+function mk(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+escHtml(data&&data[field]||'')+'"></div>';}
+function mkS(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+escHtml(data&&data[field]||'')+'" maxlength="1"></div>';}
 function mkSmall(lbl,field,data){
   var extra='';
   if(field==='height')extra=' oninput="fmtHeight(this)"';
-  return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"'+extra+'></div>';
+  return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+escHtml(data&&data[field]||'')+'"'+extra+'></div>';
 }
-function mkC(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"></div>';}
+function mkC(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+escHtml(data&&data[field]||'')+'"></div>';}
 function mkSelC(lbl,field,opts,data){var val=data&&data[field]||'';var options=opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('');return '<div class="field"><label>'+lbl+'</label><select data-field="'+field+'">'+options+'</select></div>';}
 function mkSel(lbl,field,opts,data){
   var val=data&&data[field]||'';
@@ -1493,8 +1508,8 @@ function mkSel(lbl,field,opts,data){
 function addDoctorRow(data){
   var div=document.createElement('div');div.className='doctor-row-data';
   div.style.cssText='display:grid;grid-template-columns:2fr 1fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
-  div.innerHTML='<div class="field"><label>Doctor Name</label><input data-field="name" value="'+(data&&data.name||'')+'"></div>'+
-    '<div class="field"><label>Specialty / Phone</label><input data-field="specialty" value="'+(data&&data.specialty||'')+'"></div>'+
+  div.innerHTML='<div class="field"><label>Doctor Name</label><input data-field="name" value="'+escHtml(data&&data.name||'')+'"></div>'+
+    '<div class="field"><label>Specialty / Phone</label><input data-field="specialty" value="'+escHtml(data&&data.specialty||'')+'"></div>'+
     '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this doctor?\')" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   document.getElementById('doctorsContainer').appendChild(div);
 }
@@ -1509,9 +1524,9 @@ function getAllMeds(){return MED_LIST.concat(_customMeds).sort(function(a,b){ret
 function addMedRow(data){
   var div=document.createElement('div');div.className='med-row-data';
   div.style.cssText='display:grid;grid-template-columns:2fr 80px 1fr auto 30px;gap:6px;align-items:end;margin-bottom:6px;position:relative;';
-  div.innerHTML='<div class="field autocomplete-wrap"><label>Medication Name</label><input data-field="name" placeholder="Start typing..." value="'+(data&&data.name||'')+'" oninput="medAC(this)" onblur="medBlur(this)" autocomplete="off"><div class="autocomplete-list"></div></div>'+
-    '<div class="field"><label>Mg</label><input data-field="mg" value="'+(data&&data.mg||'')+'"></div>'+
-    '<div class="field"><label>Frequency</label><input data-field="frequency" value="'+(data&&data.frequency||'')+'"></div>'+
+  div.innerHTML='<div class="field autocomplete-wrap"><label>Medication Name</label><input data-field="name" placeholder="Start typing..." value="'+escHtml(data&&data.name||'')+'" oninput="medAC(this)" onblur="medBlur(this)" autocomplete="off"><div class="autocomplete-list"></div></div>'+
+    '<div class="field"><label>Mg</label><input data-field="mg" value="'+escHtml(data&&data.mg||'')+'"></div>'+
+    '<div class="field"><label>Frequency</label><input data-field="frequency" value="'+escHtml(data&&data.frequency||'')+'"></div>'+
     '<button type="button" class="icon-btn" onclick="saveMedFromRow(this)" title="Save this medication to your library"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>'+
     '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this medication?\')" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   document.getElementById('medsContainer').appendChild(div);
@@ -1564,10 +1579,10 @@ function addAncilRow(data){
   var main=document.createElement('div');main.className='ancil-row-data';
   main.style.cssText='display:grid;grid-template-columns:0.7fr 1.4fr 0.7fr 1fr 1fr 30px;gap:6px;align-items:end;';
   main.innerHTML='<div class="field"><label>Type</label><input data-field="type" value="'+type+'" readonly style="background:var(--surface);"></div>'+
-    '<div class="field"><label>Plan Name</label><input data-field="planName" value="'+(data.planName||'').replace(/"/g,'&quot;')+'"></div>'+
-    '<div class="field"><label>Premium</label><input data-field="premium" placeholder="$" value="'+(data.premium||'').replace(/"/g,'&quot;')+'" oninput="fmtMoney(this);calcTotalMonthly()" onblur="fmtMoneyBlur(this);calcTotalMonthly()"></div>'+
-    '<div class="field"><label>Pay Date</label><input type="date" data-field="payDate" value="'+(data.payDate||'')+'"></div>'+
-    '<div class="field"><label>Effective</label><input type="date" data-field="effective" value="'+(data.effective||'')+'"></div>'+
+    '<div class="field"><label>Plan Name</label><input data-field="planName" value="'+escHtml(data.planName||'')+'"></div>'+
+    '<div class="field"><label>Premium</label><input data-field="premium" placeholder="$" value="'+escHtml(data.premium||'')+'" oninput="fmtMoney(this);calcTotalMonthly()" onblur="fmtMoneyBlur(this);calcTotalMonthly()"></div>'+
+    '<div class="field"><label>Pay Date</label><input type="date" data-field="payDate" value="'+escHtml(data.payDate||'')+'"></div>'+
+    '<div class="field"><label>Effective</label><input type="date" data-field="effective" value="'+escHtml(data.effective||'')+'"></div>'+
     '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this ancillary plan?\',calcTotalMonthly)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   wrap.appendChild(main);
   // Dental-only extras: Waive Dental checkbox + previous-carrier fields
@@ -1580,8 +1595,8 @@ function addAncilRow(data){
     extras.innerHTML='<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text);cursor:pointer;">'+
       '<input type="checkbox" data-field="waiveDental" '+waived+' onchange="toggleWaiveDentalFields(this)"> Waive Dental (client has existing dental coverage)</label>'+
       '<div class="dental-prev-fields fg g2" style="gap:8px;margin-top:8px;display:'+(data.waiveDental?'grid':'none')+';">'+
-        '<div class="field"><label>Previous Dental Carrier</label><input data-field="prevCarrier" value="'+(data.prevCarrier||'').replace(/"/g,'&quot;')+'"></div>'+
-        '<div class="field"><label>Previous Member #</label><input data-field="prevMemberNum" value="'+(data.prevMemberNum||'').replace(/"/g,'&quot;')+'"></div>'+
+        '<div class="field"><label>Previous Dental Carrier</label><input data-field="prevCarrier" value="'+escHtml(data.prevCarrier||'')+'"></div>'+
+        '<div class="field"><label>Previous Member #</label><input data-field="prevMemberNum" value="'+escHtml(data.prevMemberNum||'')+'"></div>'+
       '</div>';
     wrap.appendChild(extras);
   }
@@ -1629,7 +1644,7 @@ function renderTopReferrersCard(){
   div.className='report-card';
   div.style.cssText='min-width:200px;';
   var items=top.map(function(r){
-    return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid #f0f3f7;"><span>'+r.name+'</span><strong style="color:var(--accent);">'+r.count+'</strong></div>';
+    return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid #f0f3f7;"><span>'+escHtml(r.name)+'</span><strong style="color:var(--accent);">'+escHtml(r.count)+'</strong></div>';
   }).join('');
   div.innerHTML='<div class="lbl" style="margin-bottom:6px;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:0.4px;">Top Referrers</div>'+items+
     (refs.length>5?'<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">+ '+(refs.length-5)+' more</div>':'');
@@ -1646,7 +1661,7 @@ function runReport(filter,title){
   document.getElementById('reportTitle').textContent=title+' ('+data.length+')';
   document.getElementById('reportTableHead').innerHTML='<tr><th>Name</th><th>DOB</th><th>Phone</th><th>Email</th><th>Plan</th><th>Premium</th><th>Agent</th></tr>';
   var tbody=document.getElementById('reportTableBody');tbody.innerHTML='';
-  data.forEach(function(c){var tr=document.createElement('tr');tr.innerHTML='<td>'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</td><td>'+(c.f_dob||'')+'</td><td>'+(c.f_phone||'')+'</td><td>'+(c.f_email||'')+'</td><td>'+(c.f_planType||'')+'</td><td>'+(c.f_premium?'$'+c.f_premium:'')+'</td><td>'+(c.f_agent||'')+'</td>';tbody.appendChild(tr);});
+  data.forEach(function(c){var tr=document.createElement('tr');tr.innerHTML='<td>'+escHtml(((c.f_firstName||'')+' '+(c.f_lastName||'')).trim())+'</td><td>'+escHtml(c.f_dob)+'</td><td>'+escHtml(c.f_phone)+'</td><td>'+escHtml(c.f_email)+'</td><td>'+escHtml(c.f_planType)+'</td><td>'+(c.f_premium?'$'+escHtml(c.f_premium):'')+'</td><td>'+escHtml(c.f_agent)+'</td>';tbody.appendChild(tr);});
   document.getElementById('reportResult').style.display='block';
 }
 function exportReportExcel(){
@@ -1744,10 +1759,10 @@ function _searchRowsHtml(results,activeIdx,hoverFn,pickFn){
     var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()||'Unnamed';
     var sub=[c.f_phone,c.f_email,c.f_dob].filter(Boolean).join(' · ');
     var meta=[c.f_planType,c.f_planCarrier,c.f_agent].filter(Boolean).join(' · ');
-    return '<div class="qs-row" data-id="'+c._id+'" onmouseenter="'+hoverFn+'('+i+')" onmousedown="'+pickFn+'()" style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #f0f3f7;'+(i===activeIdx?'background:var(--accent-tint);':'')+'">'+
-      '<div style="font-weight:600;font-size:13px;color:var(--text);">'+name+'</div>'+
-      (sub?'<div style="font-size:11px;color:var(--text-muted);margin-top:1px;">'+sub+'</div>':'')+
-      (meta?'<div style="font-size:11px;color:var(--text-subtle);margin-top:1px;">'+meta+'</div>':'')+
+    return '<div class="qs-row" data-id="'+escHtml(c._id)+'" onmouseenter="'+hoverFn+'('+i+')" onmousedown="'+pickFn+'()" style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #f0f3f7;'+(i===activeIdx?'background:var(--accent-tint);':'')+'">'+
+      '<div style="font-weight:600;font-size:13px;color:var(--text);">'+escHtml(name)+'</div>'+
+      (sub?'<div style="font-size:11px;color:var(--text-muted);margin-top:1px;">'+escHtml(sub)+'</div>':'')+
+      (meta?'<div style="font-size:11px;color:var(--text-subtle);margin-top:1px;">'+escHtml(meta)+'</div>':'')+
       '</div>';
   }).join('');
 }
@@ -1893,9 +1908,9 @@ function renderCarriers(){
   carriers.forEach(function(c,idx){
     var div=document.createElement('div');
     div.style.cssText='display:grid;grid-template-columns:1.5fr 1fr 0.8fr 30px;gap:8px;align-items:end;margin-bottom:8px;';
-    div.innerHTML='<div class="field"><label>Carrier Name</label><input value="'+(c.name||'').replace(/"/g,'&quot;')+'" oninput="carriers['+idx+'].name=this.value;saveCarriers();"></div>'+
-      '<div class="field"><label>Contact Person</label><input value="'+(c.contact||'').replace(/"/g,'&quot;')+'" oninput="carriers['+idx+'].contact=this.value;saveCarriers();"></div>'+
-      '<div class="field"><label>Phone</label><input value="'+(c.phone||'').replace(/"/g,'&quot;')+'" oninput="carriers['+idx+'].phone=this.value;saveCarriers();"></div>'+
+    div.innerHTML='<div class="field"><label>Carrier Name</label><input value="'+escHtml(c.name||'')+'" oninput="carriers['+idx+'].name=this.value;saveCarriers();"></div>'+
+      '<div class="field"><label>Contact Person</label><input value="'+escHtml(c.contact||'')+'" oninput="carriers['+idx+'].contact=this.value;saveCarriers();"></div>'+
+      '<div class="field"><label>Phone</label><input value="'+escHtml(c.phone||'')+'" oninput="carriers['+idx+'].phone=this.value;saveCarriers();"></div>'+
       '<button type="button" class="icon-btn" onclick="confirmRemoveCarrier('+idx+')" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
     container.appendChild(div);
   });
@@ -1982,8 +1997,8 @@ function renderRecentRecords(){
     div.innerHTML=
       '<div style="width:24px;height:24px;border-radius:50%;background:#1a3a5c;color:#fff;font-size:11px;font-weight:bold;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'+(i+1)+'</div>'+
       '<div style="flex:1;">'+
-        '<div style="font-weight:600;font-size:13px;color:#1a3a5c;">'+name+'</div>'+
-        '<div style="font-size:11px;color:#666;margin-top:2px;">'+(planType?'<span style="background:#dbeafe;color:#1a3a5c;padding:1px 6px;border-radius:8px;font-size:10px;margin-right:6px;">'+planType+'</span>':'')+(agent||'')+'</div>'+
+        '<div style="font-weight:600;font-size:13px;color:#1a3a5c;">'+escHtml(name)+'</div>'+
+        '<div style="font-size:11px;color:#666;margin-top:2px;">'+(planType?'<span style="background:#dbeafe;color:#1a3a5c;padding:1px 6px;border-radius:8px;font-size:10px;margin-right:6px;">'+escHtml(planType)+'</span>':'')+escHtml(agent||'')+'</div>'+
       '</div>'+
       '<div style="font-size:10px;color:#999;white-space:nowrap;">'+whenStr+'</div>'+
       (c?'<button class="btn btn-blue" style="padding:4px 10px;font-size:11px;">Open</button>':'');
@@ -2056,7 +2071,7 @@ function todoClientAC(el){
   matches.forEach(function(c){
     var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).trim();
     var d=document.createElement('div');
-    d.innerHTML='<strong>'+name+'</strong><span style="font-size:10px;color:#666;margin-left:6px;">'+(c.f_planType||'')+'</span>';
+    d.innerHTML='<strong>'+escHtml(name)+'</strong><span style="font-size:10px;color:#666;margin-left:6px;">'+escHtml(c.f_planType)+'</span>';
     d.style.cssText='padding:6px 8px;cursor:pointer;';
     d.addEventListener('mousedown',function(e){
       e.preventDefault();
@@ -2076,8 +2091,8 @@ function saveTodo(){
   var due=document.getElementById('todoDueInput').value;
   var priority=document.getElementById('todoPriorityInput').value;
   var clientId=document.getElementById('todoClientId').value||'';
-  var clientName=document.getElementById('todoClientInput').value.trim()||'';
-  _todos.unshift({id:Date.now(),task:task,due:due,priority:priority,done:false,created:new Date().toISOString(),clientId:clientId,clientName:clientId?clientName:''});
+  // clientName deliberately NOT persisted — resolved from `clients` in renderTodos
+  _todos.unshift({id:Date.now(),task:task,due:due,priority:priority,done:false,created:new Date().toISOString(),clientId:clientId});
   saveTodos();
   document.getElementById('todoAddSection').style.display='none';
   document.getElementById('todoClientInput').value='';
@@ -2175,10 +2190,10 @@ function runAdvSearch(){
   results.forEach(function(c){
     var tr=document.createElement('tr');
     var age=calcClientAge(c);
-    tr.innerHTML='<td><span class="client-name-link" onclick="editClient(\''+c._id+'\')">'+((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()+'</span></td>'+
-      '<td>'+(c.f_dob||'')+'</td><td>'+(age!==null?age:'')+'</td><td>'+(c.f_phone||'')+'</td><td>'+(c.f_email||'')+'</td>'+
-      '<td>'+(c.f_planType||'')+'</td><td>'+(c.f_planCarrier||'')+'</td><td>'+(c.f_premium||'')+'</td>'+
-      '<td>'+(c.f_agent||'')+'</td><td>'+(c.f_resSt||'')+'</td><td>'+(c.f_renewed||'')+'</td>';
+    tr.innerHTML='<td><span class="client-name-link" onclick="editClient(\''+escJsAttr(c._id)+'\')">'+escHtml(((c.f_firstName||'')+' '+(c.f_lastName||'')).trim())+'</span></td>'+
+      '<td>'+escHtml(c.f_dob)+'</td><td>'+(age!==null?age:'')+'</td><td>'+escHtml(c.f_phone)+'</td><td>'+escHtml(c.f_email)+'</td>'+
+      '<td>'+escHtml(c.f_planType)+'</td><td>'+escHtml(c.f_planCarrier)+'</td><td>'+escHtml(c.f_premium)+'</td>'+
+      '<td>'+escHtml(c.f_agent)+'</td><td>'+escHtml(c.f_resSt)+'</td><td>'+escHtml(c.f_renewed)+'</td>';
     tbody.appendChild(tr);
   });
 }
@@ -2261,7 +2276,9 @@ function renderClientDocs(clientId,docs){
       var ext=(d.name||'').split('.').pop().toLowerCase();
       var icon=(['jpg','jpeg','png','gif','webp'].indexOf(ext)>=0)?'&#128247;':(['pdf'].indexOf(ext)>=0)?'&#128196;':'&#128196;';
       var kb=d.size?Math.round(d.size/1024)+'KB':'';
-      row.innerHTML=icon+' <a href="'+d.url+'" target="_blank" style="flex:1;color:#1a3a5c;text-decoration:none;word-break:break-all;">'+d.name+'</a>'+
+      // Only emit an https URL — never let a stored value inject a javascript: scheme.
+      var safeUrl=/^https:\/\//i.test(d.url||'')?escHtml(d.url):'';
+      row.innerHTML=icon+' <a href="'+safeUrl+'" target="_blank" rel="noopener noreferrer" style="flex:1;color:#1a3a5c;text-decoration:none;word-break:break-all;">'+escHtml(d.name)+'</a>'+
         '<span style="color:#999;font-size:10px;">'+kb+'</span>'+
         '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="deleteClientDoc(\''+clientId+'\',\''+encodeURIComponent(d.name)+'\')">✕</button>';
       ul.appendChild(row);
@@ -2291,7 +2308,7 @@ function uploadClientDoc(clientId){
   var fileNames=files.map(function(f){return f.name;}).join(', ');
   Promise.all(promises)
   .then(function(){
-    aiTrack('DocumentUploaded',{clientType:'health',clientId:clientId,files:fileNames});
+    aiTrack('DocumentUploaded',{clientType:'health',clientId:clientId,fileCount:(fileNames||[]).length}); // filenames can carry PHI
     status.textContent='';input.value='';loadClientDocs(clientId);
   })
   .catch(function(e){status.textContent='Upload failed: '+e;});
@@ -2326,7 +2343,7 @@ function addrAC(el,prefix){
         var state=addr.state||'';var zip=addr.postcode||'';
         if(!street)return;
         var d=document.createElement('div');
-        d.innerHTML='<div class="addr-main">'+street+'</div><div class="addr-sub">'+city+(state?', '+state:'')+(zip?' '+zip:'')+'</div>';
+        d.innerHTML='<div class="addr-main">'+escHtml(street)+'</div><div class="addr-sub">'+escHtml(city)+(state?', '+escHtml(state):'')+(zip?' '+escHtml(zip):'')+'</div>';
         d.addEventListener('mousedown',function(e){
           e.preventDefault();
           el.value=street;
@@ -2437,7 +2454,19 @@ function exportAdvSearchExcel(){
 // ===================== TO-DO LIST =====================
 var _todos=[];
 var _todoFilter='all';
-function loadTodos(){try{_todos=JSON.parse(localStorage.getItem('crm_todos')||'[]');}catch(e){_todos=[];}}
+/* Same PHI rule as recent-records: only clientId is persisted, the name is
+   resolved from the in-memory clients array at render time. Migration below
+   strips clientName from any entry saved before this fix. */
+function loadTodos(){
+  try{
+    _todos=JSON.parse(localStorage.getItem('crm_todos')||'[]');
+    var hadPHI=_todos.some(function(t){return t&&t.clientName;});
+    if(hadPHI){
+      _todos.forEach(function(t){if(t)delete t.clientName;});
+      saveTodos(); // re-persist immediately so the old names are gone from disk
+    }
+  }catch(e){_todos=[];}
+}
 function saveTodos(){localStorage.setItem('crm_todos',JSON.stringify(_todos));}
 loadTodos();
 function openAddTodo(){
@@ -2501,13 +2530,16 @@ function renderTodos(){
       else dueStr='<span style="color:#666;font-size:10px;margin-left:6px;">Due: '+t.due+'</span>';
     }
     var clientLink='';
-    if(t.clientId&&t.clientName){
-      clientLink='<span onclick="editClient(\''+t.clientId+'\')" style="font-size:10px;background:#dbeafe;color:#1a3a5c;padding:2px 8px;border-radius:10px;cursor:pointer;margin-left:6px;font-weight:600;" title="Open client record">&#128101; '+t.clientName+'</span>';
+    if(t.clientId){
+      // Resolve the name from memory — it is deliberately not stored in localStorage.
+      var tc=(clients||[]).find(function(x){return String(x._id)===String(t.clientId);});
+      var tcName=tc?(((tc.f_firstName||'')+' '+(tc.f_lastName||'')).trim()||'Unnamed'):'';
+      if(tcName)clientLink='<span onclick="editClient(\''+escJsAttr(t.clientId)+'\')" style="font-size:10px;background:#dbeafe;color:#1a3a5c;padding:2px 8px;border-radius:10px;cursor:pointer;margin-left:6px;font-weight:600;" title="Open client record">&#128101; '+escHtml(tcName)+'</span>';
     }
     div.innerHTML=
       '<input type="checkbox" '+(t.done?'checked':'')+' style="width:16px;height:16px;cursor:pointer;flex-shrink:0;" onchange="toggleTodo('+t.id+')">'+
       '<div style="flex:1;">'+
-        '<span style="font-size:13px;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+(t.task)+'</span>'+dueStr+clientLink+
+        '<span style="font-size:13px;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+escHtml(t.task)+'</span>'+dueStr+clientLink+
       '</div>'+
       '<span style="font-size:10px;color:'+prioColor+';font-weight:600;white-space:nowrap;">'+prioLabel+'</span>'+
       '<button class="btn btn-red" style="padding:2px 7px;font-size:11px;" onclick="deleteTodo('+t.id+')">✕</button>';
