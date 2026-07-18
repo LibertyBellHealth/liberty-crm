@@ -898,7 +898,16 @@ function calcMemberAge(dobEl,ageId){var v=dobEl.value;if(!v)return;var d=new Dat
 function toggleReveal(id,btn){var el=document.getElementById(id);if(el.type==='password'){el.type='text';btn.textContent='Hide';}else{el.type='password';btn.textContent='Show';}}
 function focusReveal(el){el.type='text';}
 function blurReveal(el){el.type='password';}
-function copyField(id,btn){var el=document.getElementById(id);var t=el.type;el.type='text';navigator.clipboard.writeText(el.value);el.type=t;if(btn){btn.classList.add('copied');var o=btn.innerHTML;btn.innerHTML=SVG_CHECK;setTimeout(function(){btn.classList.remove('copied');btn.innerHTML=o;},1200);}}
+function copyField(id,btn){
+  var el=document.getElementById(id);var t=el.type;el.type='text';
+  // Card number / exp: strip formatting spaces + slashes so it pastes cleanly
+  // into other forms that expect raw digits.
+  var val=el.value;
+  if(id==='f_cardNumber')val=val.replace(/\s+/g,'');
+  navigator.clipboard.writeText(val);
+  el.type=t;
+  if(btn){btn.classList.add('copied');var o=btn.innerHTML;btn.innerHTML=SVG_CHECK;setTimeout(function(){btn.classList.remove('copied');btn.innerHTML=o;},1200);}
+}
 var SVG_PHONE='<svg viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg>';
 var SVG_MAIL='<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22 6 12 13 2 6"/></svg>';
 var SVG_COPY='<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -1165,7 +1174,6 @@ function lookupBankFromRouting(rn){
   var name=ROUTING_LOOKUP[digits];if(!name)return;
   if(_isSafeToAutofill(bankInput)){
     _setAutofilled(bankInput,name);
-    toast('Bank identified: '+name,'success');
   }
 }
 /* Clamp date inputs so a 5+ digit year gets trimmed to 4 (browsers accept 6-digit years).
