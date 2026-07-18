@@ -267,7 +267,6 @@ function startNewApp(type){
   document.getElementById('formTitle').textContent='New Health Application';
   document.getElementById('deleteBtn').style.display='none';
   document.getElementById('deleteBtn2').style.display='none';
-  document.getElementById('f_date').value=fmtToday();
   showView('form_edit');
 }
 function fmtToday(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
@@ -447,7 +446,7 @@ function renderClientTable(data){
       '<td>'+(c.f_premium?'$'+c.f_premium:'')+'</td>'+
       '<td>'+(c.f_agent||'')+'</td>'+
       '<td>'+renewedCell+'</td>'+
-      '<td>'+(c.homecare_client_id||c.f_homecareClientId?'<a class="homecare-link" href="https://app.libertybellhealth.com" target="_blank">View ↗</a>':'')+'</td>';
+'';
     tbody.appendChild(tr);
   });
 
@@ -763,19 +762,25 @@ function updateOtherIncomeAddBtn(){
   b.style.display=c.querySelectorAll('.oi-row').length>=OTHER_INCOME_MAX?'none':'';
 }
 function calcTotalMonthly(){
-  var h=parseFloat((document.getElementById('f_premium').value||'').replace(/[^0-9.]/g,''))||0;
+  var pEl=document.getElementById('f_premium');
+  var h=pEl?parseFloat((pEl.value||'').replace(/[^0-9.]/g,''))||0:0;
   var a=0;document.querySelectorAll('.ancil-row-data').forEach(function(row){var p=row.querySelector('[data-field="premium"]');a+=parseFloat((p&&p.value||'').replace(/[^0-9.]/g,''))||0;});
-  var appFee=parseFloat((document.getElementById('f_appFee').value||'').replace(/[^0-9.]/g,''))||0;
   var totalMonthly=h+a;
-  var totalFirst=totalMonthly+appFee;
   var disp=document.getElementById('totalMonthlyDisplay');if(disp)disp.textContent='$'+totalMonthly.toFixed(2);
   var hid=document.getElementById('f_totalMonthly');if(hid)hid.value=totalMonthly>0?'$'+totalMonthly.toFixed(2):'';
-  var show=document.getElementById('f_totalMonthlyShow');if(show)show.value=totalMonthly>0?'$'+totalMonthly.toFixed(2):'';
-  var first=document.getElementById('f_totalFirstMonth');if(first)first.value=totalFirst>0?'$'+totalFirst.toFixed(2):'';
 }
-function checkWaiveDental(){
-  var has=Array.from(document.querySelectorAll('.ancil-row-data')).some(function(r){var t=r.querySelector('[data-field="type"]');return t&&t.value==='Dental';});
-  document.getElementById('waiveDentalField').style.display=has?'block':'none';
+function checkWaiveDental(){/* no-op — waive dental is now inline in the Dental ancillary row */}
+/* Credit card formatting: Amex (starts with 3) → 4-6-5; everything else → 4-4-4-4 */
+function formatCardNumber(el){
+  var v=(el.value||'').replace(/\D/g,'');
+  var isAmex=v.charAt(0)==='3';
+  if(isAmex){v=v.slice(0,15);var m=v.match(/^(\d{0,4})(\d{0,6})(\d{0,5})$/);el.value=m?[m[1],m[2],m[3]].filter(Boolean).join(' '):v;}
+  else{v=v.slice(0,16);var m2=v.match(/^(\d{0,4})(\d{0,4})(\d{0,4})(\d{0,4})$/);el.value=m2?[m2[1],m2[2],m2[3],m2[4]].filter(Boolean).join(' '):v;}
+}
+function formatCardExp(el){
+  var v=(el.value||'').replace(/\D/g,'').slice(0,4);
+  if(v.length>=3)v=v.slice(0,2)+'/'+v.slice(2);
+  el.value=v;
 }
 function updateMemberCount(){document.getElementById('memberCount').textContent=document.querySelectorAll('.member-row-data').length;}
 function populateCountySel(sel,counties,savedVal){
@@ -816,7 +821,7 @@ function restoreCounty(zip,prefix,saved){
 function addMemberRow(data){
   var uid='m'+Date.now()+Math.floor(Math.random()*1000);
   var div=document.createElement('div');div.className='member-row-data';
-  div.style.cssText='display:grid;grid-template-columns:1fr 0.25fr 1fr 0.7fr 0.5fr 0.5fr 0.5fr 0.35fr 0.35fr 0.65fr 0.35fr 1.2fr 0.5fr 30px;gap:5px;align-items:end;margin-bottom:6px;';
+  div.style.cssText='display:grid;grid-template-columns:1.1fr 0.25fr 1.1fr 0.75fr 0.5fr 0.5fr 0.5fr 0.4fr 0.4fr 0.7fr 0.4fr 1.2fr 0.55fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
   div.innerHTML=
     mk('First Name','firstName',data)+mkS('MI','mi',data)+mk('Last Name','lastName',data)+
     mkSel('Relation','relation',['','Spouse','Child','Mother','Father','Other'],data)+
@@ -828,7 +833,7 @@ function addMemberRow(data){
     '<div class="field"><label style="font-size:9px;">Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;font-size:11px;padding:4px 5px;max-width:45px;" value="'+(data&&data.age||'')+'"></div>'+
     '<div class="field"><label style="font-size:9px;">SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11" style="font-size:11px;padding:4px 5px;width:100%;"></div>'+
     mkSel('Insured','insured',['','Yes','No'],data)+
-    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="if(confirm(\'Remove this household member?\')){this.parentNode.remove();updateMemberCount();}">x</button>';
+    '<button type="button" class="icon-btn" onclick="if(confirm(\'Remove this household member?\')){this.parentNode.remove();updateMemberCount();}" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   document.getElementById('membersContainer').appendChild(div);
   updateMemberCount();
 }
@@ -910,16 +915,39 @@ function addAncilRow(data){
   var type=data?data.type:document.getElementById('ancilTypeSelect').value;
   if(!type){toast('Please select a plan type first.','error');return;}
   document.getElementById('ancilTypeSelect').value='';
-  var div=document.createElement('div');div.className='ancil-row-data';
-  div.style.cssText='display:grid;grid-template-columns:0.7fr 1.5fr 0.7fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
-  div.innerHTML='<div class="field"><label>Type</label><input data-field="type" value="'+type+'" readonly style="background:#f0f7ff;font-size:11px;"></div>'+
-    '<div class="field"><label>Plan Name</label><input data-field="planName" value="'+(data&&data.planName||'')+'"></div>'+
-    '<div class="field"><label>Premium</label><input data-field="premium" placeholder="$" value="'+(data&&data.premium||'')+'" oninput="fmtMoney(this);calcTotalMonthly()" onblur="fmtMoneyBlur(this);calcTotalMonthly()"></div>'+
-    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="if(confirm(\'Remove this ancillary plan?\')){this.parentNode.remove();checkWaiveDental();calcTotalMonthly();}">x</button>';
-  // Insert before waive dental field so dental rows appear above it
-  var container=document.getElementById('ancilContainer');
-  container.appendChild(div);
-  checkWaiveDental();calcTotalMonthly();
+  data=data||{};
+  var wrap=document.createElement('div');wrap.className='ancil-row-wrap';
+  wrap.style.cssText='padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-alt);margin-bottom:8px;';
+  var main=document.createElement('div');main.className='ancil-row-data';
+  main.style.cssText='display:grid;grid-template-columns:0.7fr 1.4fr 0.7fr 1fr 1fr 30px;gap:6px;align-items:end;';
+  main.innerHTML='<div class="field"><label>Type</label><input data-field="type" value="'+type+'" readonly style="background:var(--surface);"></div>'+
+    '<div class="field"><label>Plan Name</label><input data-field="planName" value="'+(data.planName||'').replace(/"/g,'&quot;')+'"></div>'+
+    '<div class="field"><label>Premium</label><input data-field="premium" placeholder="$" value="'+(data.premium||'').replace(/"/g,'&quot;')+'" oninput="fmtMoney(this);calcTotalMonthly()" onblur="fmtMoneyBlur(this);calcTotalMonthly()"></div>'+
+    '<div class="field"><label>Pay Date</label><input type="date" data-field="payDate" value="'+(data.payDate||'')+'"></div>'+
+    '<div class="field"><label>Effective</label><input type="date" data-field="effective" value="'+(data.effective||'')+'"></div>'+
+    '<button type="button" class="icon-btn" onclick="if(confirm(\'Remove this ancillary plan?\')){this.closest(\'.ancil-row-wrap\').remove();calcTotalMonthly();}" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+  wrap.appendChild(main);
+  // Dental-only extras: Waive Dental checkbox + previous-carrier fields
+  if(type==='Dental'){
+    var extras=document.createElement('div');
+    extras.className='ancil-dental-extras';
+    extras.style.cssText='margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);';
+    var waived=data.waiveDental?'checked':'';
+    var prevDisp=data.waiveDental?'':'none';
+    extras.innerHTML='<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text);cursor:pointer;">'+
+      '<input type="checkbox" data-field="waiveDental" '+waived+' onchange="toggleWaiveDentalFields(this)"> Waive Dental (client has existing dental coverage)</label>'+
+      '<div class="dental-prev-fields fg g2" style="gap:8px;margin-top:8px;display:'+(data.waiveDental?'grid':'none')+';">'+
+        '<div class="field"><label>Previous Dental Carrier</label><input data-field="prevCarrier" value="'+(data.prevCarrier||'').replace(/"/g,'&quot;')+'"></div>'+
+        '<div class="field"><label>Previous Member #</label><input data-field="prevMemberNum" value="'+(data.prevMemberNum||'').replace(/"/g,'&quot;')+'"></div>'+
+      '</div>';
+    wrap.appendChild(extras);
+  }
+  document.getElementById('ancilContainer').appendChild(wrap);
+  calcTotalMonthly();
+}
+function toggleWaiveDentalFields(cb){
+  var extras=cb.closest('.ancil-dental-extras');if(!extras)return;
+  var fields=extras.querySelector('.dental-prev-fields');if(fields)fields.style.display=cb.checked?'grid':'none';
 }
 
 function toggleSelectAll(cb){document.querySelectorAll('.row-cb').forEach(function(c){c.checked=cb.checked;});updateBulkBtn();}

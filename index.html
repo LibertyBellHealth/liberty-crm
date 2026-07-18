@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717l">
+<link rel="stylesheet" href="styles.css?v=20260717m">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -110,7 +110,6 @@
             <th class="sortable resizable" data-sortkey="premium" data-col="premium" onclick="sortClientBy('premium')">Premium<span class="resize-handle" onmousedown="startColResize(event,'premium')"></span></th>
             <th class="sortable resizable" data-sortkey="agent" data-col="agent" onclick="sortClientBy('agent')">Agent<span class="resize-handle" onmousedown="startColResize(event,'agent')"></span></th>
             <th class="sortable resizable" data-sortkey="renewed" data-col="renewed" onclick="sortClientBy('renewed')">Renewed<span class="resize-handle" onmousedown="startColResize(event,'renewed')"></span></th>
-            <th class="sortable" data-sortkey="homeCare" data-col="homeCare" onclick="sortClientBy('homeCare')">Home Care</th>
           </tr></thead>
           <tbody id="clientTableBody"></tbody>
         </table>
@@ -176,12 +175,12 @@
               <div class="field"><label>Level</label><select id="f_level"><option></option><option>Bronze</option><option>Silver</option><option>Gold</option><option>Platinum</option><option>Catastrophic</option></select></div>
               <div class="field"><label>Deductible</label><input id="f_deductible" oninput="fmtMoney(this)" onblur="fmtMoneyBlur(this)"></div>
             </div>
-            <div class="fg" style="grid-template-columns:0.8fr 0.8fr 0.8fr 0.8fr 0.5fr;gap:8px;margin-bottom:12px;">
+            <div class="fg" style="grid-template-columns:0.9fr 0.9fr 0.9fr 1fr 1fr;gap:8px;margin-bottom:12px;">
               <div class="field"><label>Co/MOOP</label><input id="f_comoop" oninput="fmtMoney(this)" onblur="fmtMoneyBlur(this)"></div>
               <div class="field"><label>Total Premium</label><input id="f_totalPremium" oninput="fmtMoney(this)" onblur="fmtMoneyBlur(this)"></div>
-              <div class="field"><label>Subsidy</label><input id="f_subsidy" oninput="fmtMoney(this)" onblur="fmtMoneyBlur(this)"></div>
               <div class="field"><label>Premium</label><input id="f_premium" oninput="fmtMoney(this);calcTotalMonthly()" onblur="fmtMoneyBlur(this);calcTotalMonthly()"></div>
-              <div class="field"><label>App Fee</label><input id="f_appFee" oninput="fmtMoney(this);calcTotalMonthly()" onblur="fmtMoneyBlur(this);calcTotalMonthly()"></div>
+              <div class="field"><label>Health Pay Date</label><input type="date" id="f_healthPayDate"></div>
+              <div class="field"><label>Health Effective</label><input type="date" id="f_healthEffective"></div>
             </div>
             <div style="margin-bottom:6px;">
               <input type="checkbox" id="f_hasMedicare" onchange="toggleMedicare()" style="cursor:pointer;">
@@ -210,10 +209,6 @@
           <div class="form-section">
             <div class="form-section-title">Ancillary Plans</div>
             <div id="ancilContainer"></div>
-            <div id="waiveDentalField" style="display:none;margin-top:2px;margin-bottom:8px;padding:4px 8px;background:#f0fff4;border-radius:4px;border:1px solid #d1fae5;">
-              <input type="checkbox" id="f_waiveDental" style="cursor:pointer;">
-              <span style="font-size:11px;margin-left:5px;color:#065f46;font-weight:600;">Waive Dental</span>
-            </div>
             <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
               <select id="ancilTypeSelect" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
                 <option value="">Select plan type...</option>
@@ -231,7 +226,7 @@
           <div class="form-section">
             <div class="form-section-title">Demographics & Household Members</div>
             <span class="primary-label">Primary Insured</span>
-            <div class="fg" style="grid-template-columns:1.2fr 0.25fr 1.2fr 0.8fr 0.5fr 0.5fr 0.5fr 0.35fr 0.35fr 0.65fr 0.35fr 1.2fr 0.5fr 0.5fr;gap:5px;margin-bottom:10px;align-items:end;">
+            <div class="fg" style="grid-template-columns:1.1fr 0.25fr 1.1fr 0.75fr 0.5fr 0.5fr 0.5fr 0.4fr 0.4fr 0.7fr 0.4fr 1.2fr 0.55fr 30px;gap:6px;margin-bottom:10px;align-items:end;">
               <div class="field"><label style="font-size:9px;">First Name</label><input id="f_firstName" style="font-size:11px;padding:4px 5px;"></div>
               <div class="field"><label style="font-size:9px;">MI</label><input id="f_mi" style="font-size:11px;padding:4px 5px;max-width:40px;"></div>
               <div class="field"><label style="font-size:9px;">Last Name</label><input id="f_lastName" style="font-size:11px;padding:4px 5px;"></div>
@@ -247,10 +242,14 @@
                 <input id="f_ssn" type="password" placeholder="XXX-XX-XXXX" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11" style="font-size:11px;padding:4px 5px;width:100%;">
               </div>
               <div class="field"><label style="font-size:9px;">Insured</label><select id="f_insured" style="font-size:11px;padding:4px 5px;"><option></option><option>Yes</option><option>No</option></select></div>
+              <div></div>
             </div>
-            <span class="primary-label">Household Members &nbsp;<span style="font-weight:normal;color:#555;">Total: <strong id="memberCount">0</strong></span></span>
+            <span class="primary-label">Household Members</span>
             <div id="membersContainer"></div>
-            <button class="btn add-row-btn" onclick="addMemberRow()">+ Add Household Member</button>
+            <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
+              <button class="btn add-row-btn" onclick="addMemberRow()">+ Add Household Member</button>
+              <span style="font-size:11px;color:var(--text-muted);">Total: <strong id="memberCount" style="color:var(--text);">0</strong></span>
+            </div>
           </div>
 
           <!-- 4. RESIDENTIAL ADDRESS -->
@@ -322,31 +321,14 @@
             <div class="fg g4">
               <div class="field"><label>Card Type</label><select id="f_cardType"><option></option><option>Visa</option><option>Mastercard</option><option>Amex</option><option>Discover</option></select></div>
               <div class="field"><label>Card Number</label>
-                <div class="reveal-wrap"><input id="f_cardNumber" type="password" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cardNumber',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+                <div class="reveal-wrap"><input id="f_cardNumber" type="password" placeholder="1234 5678 9012 3456" maxlength="19" oninput="formatCardNumber(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cardNumber',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
               </div>
               <div class="field"><label>Exp (MM/YY)</label>
-                <div class="reveal-wrap"><input id="f_cardExp" type="password" placeholder="MM/YY" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cardExp',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+                <div class="reveal-wrap"><input id="f_cardExp" type="password" placeholder="MM/YY" maxlength="5" oninput="formatCardExp(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cardExp',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
               </div>
               <div class="field"><label>CVV#</label>
                 <div class="reveal-wrap"><input id="f_cvv" type="password" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cvv',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
               </div>
-            </div>
-          </div>
-
-          <!-- 8. PAYMENT & EFFECTIVE DATES -->
-          <div class="form-section">
-            <div class="form-section-title">Payment & Effective Dates</div>
-            <div class="fg g4" style="margin-bottom:8px;">
-              <div class="field"><label>Health Pay Date</label><input type="date" id="f_healthPayDate"></div>
-              <div class="field"><label>Health Effective</label><input type="date" id="f_healthEffective"></div>
-              <div class="field"><label>Ancil Pay Date</label><input type="date" id="f_ancilPayDate"></div>
-              <div class="field"><label>Ancil Effective</label><input type="date" id="f_ancilEffective"></div>
-            </div>
-            <div class="fg g4">
-              <div class="field"><label>Dental Pay Date</label><input type="date" id="f_dentalPayDate"></div>
-              <div class="field"><label>Dental Effective</label><input type="date" id="f_dentalEffective"></div>
-              <div class="field"><label>Total First Month</label><input id="f_totalFirstMonth" placeholder="$" readonly style="font-weight:bold;"></div>
-              <div class="field"><label>Total Monthly</label><input id="f_totalMonthlyShow" placeholder="$" readonly style="font-weight:bold;"></div>
             </div>
           </div>
 
@@ -421,12 +403,10 @@
           <!-- 12. AGENT INFORMATION -->
           <div class="form-section">
             <div class="form-section-title">Agent Information</div>
-            <div class="fg g4">
+            <div class="fg g2">
               <div class="field"><label>Agent</label><select id="f_agent"><option>Thomas Jaboro</option><option>Paul Jaboro Jr.</option></select></div>
-              <div class="field"><label>Submitted By</label><input id="f_submittedBy"></div>
-              <div class="field"><label>Date</label><input type="date" id="f_date"></div>
               <div class="field"><label>Lead Source</label>
-                <select id="f_leadSource"><option></option><option>Insurance Quotes</option><option>Datalot</option><option>Datalot</option><option>Smart Financial</option><option>Referral</option><option>Other</option></select>
+                <select id="f_leadSource"><option></option><option>Insurance Quotes</option><option>Datalot</option><option>Smart Financial</option><option>Referral</option><option>Other</option></select>
               </div>
             </div>
             <div class="fg g3" style="margin-top:8px;">
@@ -440,7 +420,6 @@
             <div class="form-section-title">Additional Information</div>
             <div class="fg g2">
               <div class="field"><label>Mother's Maiden Name</label><input id="f_mothersMaiden"></div>
-              <div class="field"><label>Home Care Client Link</label><input id="f_homecareClientId" placeholder="Home Care client ID (optional)" style="font-size:11px;"></div>
             </div>
           </div>
 
@@ -863,7 +842,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717l"></script>
+<script src="app.js?v=20260717m"></script>
 
 </body>
 </html>
