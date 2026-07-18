@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717w">
+<link rel="stylesheet" href="styles.css?v=20260717x">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -283,12 +283,18 @@
 
           <!-- 5. MAILING ADDRESS -->
           <div class="form-section">
-            <div class="form-section-title">Mailing Address
-              <label style="font-weight:normal;font-size:11px;margin-left:10px;cursor:pointer;color:#555;text-transform:none;letter-spacing:0;">
-                <input type="checkbox" id="f_diffMailing" onchange="toggleMailingAddress()"> Different from residential
-              </label>
-            </div>
-            <div id="mailingAddressSection" style="display:none;">
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text);cursor:pointer;">
+              <input type="checkbox" id="f_diffMailing" onchange="toggleMailingAddress()"> Add a different mailing or billing address
+            </label>
+            <div id="mailingAddressSection" style="display:none;margin-top:12px;">
+              <div class="form-section-title" id="mailingAddressTitle" style="padding-bottom:5px;border-bottom:1px solid #e5e7eb;margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <span id="mailingAddressTitleText">Mailing Address</span>
+                <select id="f_addressType" onchange="updateMailingTitle()" style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;text-transform:none;letter-spacing:0;font-weight:400;color:var(--text);">
+                  <option value="Mailing">Mailing</option>
+                  <option value="Billing">Billing</option>
+                  <option value="Both">Both (Mailing + Billing)</option>
+                </select>
+              </div>
               <div class="fg g4" style="margin-bottom:8px;">
                 <div class="field autocomplete-wrap" style="grid-column:span 2;"><label>Address</label><input id="f_billAddress" autocomplete="off" oninput="addrAC(this,'bill')" onblur="setTimeout(function(){var l=document.getElementById('billAddrList');if(l)l.style.display='none';},200)"><div class="addr-autocomplete-list" id="billAddrList"></div></div>
                 <div class="field"><label>Zip</label><input id="f_billZip" oninput="lookupZip(this,'bill')"></div>
@@ -851,8 +857,8 @@
   </div>
 </div>
 
-<script src="routing-lookup.js?v=20260717w"></script>
-<script src="app.js?v=20260717w"></script>
+<script src="routing-lookup.js?v=20260717x"></script>
+<script src="app.js?v=20260717x"></script>
 
 </body>
 </html>

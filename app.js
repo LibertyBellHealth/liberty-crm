@@ -535,6 +535,7 @@ function clearForm(){
   var ag=document.getElementById('f_agent');if(ag)ag.value=localStorage.getItem('crm_default_agent')||'Thomas Jaboro';
   var sa=document.getElementById('f_diffMailing');if(sa)sa.checked=false;
   var ms=document.getElementById('mailingAddressSection');if(ms)ms.style.display='none';
+  var at=document.getElementById('f_addressType');if(at){at.value='Mailing';updateMailingTitle();}
   var rb=document.getElementById('f_referredBy');if(rb)rb.value='';
   var rbf=document.getElementById('referredByField');if(rbf)rbf.style.display='none';
   var mf=document.getElementById('medicareFields');if(mf)mf.style.display='none';
@@ -571,6 +572,17 @@ function getFormData(){
   var refBy=refByEl?refByEl.value.trim():'';
   var ls=(data.f_leadSource||'').trim();
   if(/^referral$/i.test(ls)&&refBy)data.f_leadSource='Referral: '+refBy;
+  // Address type packing: prefix bill_address with [BILL] or [BOTH] when the user
+  // marked the extra address as billing or both. Mailing (default) gets no prefix
+  // for cleanliness. Only applies if the address is actually populated.
+  var atEl=document.getElementById('f_addressType');
+  var at=atEl?atEl.value:'Mailing';
+  if(data.f_billAddress&&data.f_billAddress.trim()&&at&&at!=='Mailing'){
+    data.f_billAddress='['+at.toUpperCase()+'] '+data.f_billAddress.replace(/^\[(BILL|BOTH|MAIL(?:ING)?)\]\s*/i,'');
+  } else if(data.f_billAddress){
+    // Strip any stale prefix so switching back to Mailing removes it
+    data.f_billAddress=data.f_billAddress.replace(/^\[(BILL|BOTH|MAIL(?:ING)?)\]\s*/i,'');
+  }
   return data;
 }
 function setFormData(data){
@@ -595,6 +607,19 @@ function setFormData(data){
   var hasBill=!!(data.f_billAddress||data.f_billZip||data.f_billCity);
   var diffCb=document.getElementById('f_diffMailing');
   if(diffCb){diffCb.checked=hasBill;document.getElementById('mailingAddressSection').style.display=hasBill?'block':'none';}
+  // Unpack address type prefix: '[BILL] 123 Main' → type='Billing', address='123 Main'
+  var atEl=document.getElementById('f_addressType'),billInput=document.getElementById('f_billAddress');
+  if(atEl){
+    var raw=data.f_billAddress||'',m=raw.match(/^\[(BILL|BOTH|MAIL(?:ING)?)\]\s*(.*)$/i);
+    if(m){
+      var tag=m[1].toUpperCase();
+      atEl.value=tag==='BILL'?'Billing':(tag==='BOTH'?'Both':'Mailing');
+      if(billInput)billInput.value=m[2];
+    } else {
+      atEl.value='Mailing';
+    }
+    updateMailingTitle();
+  }
   // Unpack packed referral: "Referral: John Smith" → leadSource="Referral", referredBy="John Smith"
   var lsEl=document.getElementById('f_leadSource'),rbEl=document.getElementById('f_referredBy');
   if(lsEl&&rbEl){
@@ -691,6 +716,11 @@ function toggleMailingAddress(){
   var cb=document.getElementById('f_diffMailing');
   var sec=document.getElementById('mailingAddressSection');
   if(sec&&cb)sec.style.display=cb.checked?'block':'none';
+}
+function updateMailingTitle(){
+  var t=(document.getElementById('f_addressType')||{}).value||'Mailing';
+  var el=document.getElementById('mailingAddressTitleText');
+  if(el)el.textContent=t==='Both'?'Mailing & Billing Address':t+' Address';
 }
 function calcTotalIncome(){
   var t=0;
