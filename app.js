@@ -910,88 +910,9 @@ function autoDetectCardType(el){
   var sel=document.getElementById('f_cardType');
   if(sel&&!sel.value)sel.value=brand;
 }
-/* Static lookup of the top ~150 US banks by ABA routing number. Sourced from
-   Federal Reserve E-Payments Directory (2024). Bundled locally so we're not
-   dependent on flaky third-party APIs (routingnumbers.info was sold in 2026). */
-var ROUTING_LOOKUP={
-  // Chase (JPMorgan) — one per state
-  '021000021':'JPMorgan Chase Bank','322271627':'JPMorgan Chase Bank','325070760':'JPMorgan Chase Bank',
-  '267084131':'JPMorgan Chase Bank','021202337':'JPMorgan Chase Bank','111000614':'JPMorgan Chase Bank',
-  '072000326':'JPMorgan Chase Bank','074000010':'JPMorgan Chase Bank','083000137':'JPMorgan Chase Bank',
-  '104000016':'JPMorgan Chase Bank','075000019':'JPMorgan Chase Bank','122100024':'JPMorgan Chase Bank',
-  // Bank of America
-  '026009593':'Bank of America','121000358':'Bank of America','021200339':'Bank of America',
-  '063100277':'Bank of America','082000073':'Bank of America','122400724':'Bank of America',
-  '113000023':'Bank of America','111000025':'Bank of America','052001633':'Bank of America',
-  '053000196':'Bank of America','054001204':'Bank of America','063000021':'Bank of America',
-  // Wells Fargo
-  '121000248':'Wells Fargo Bank','121042882':'Wells Fargo Bank','111900659':'Wells Fargo Bank',
-  '053101121':'Wells Fargo Bank','091000019':'Wells Fargo Bank','102000076':'Wells Fargo Bank',
-  '104000058':'Wells Fargo Bank','051400549':'Wells Fargo Bank','063107513':'Wells Fargo Bank',
-  '053000219':'Wells Fargo Bank','122105278':'Wells Fargo Bank','321270742':'Wells Fargo Bank',
-  // Citibank
-  '021000089':'Citibank','254070116':'Citibank','321171184':'Citibank','322271724':'Citibank',
-  '271070801':'Citibank','266086554':'Citibank','113193532':'Citibank',
-  // US Bank
-  '091000022':'U.S. Bank','122235821':'U.S. Bank','123000220':'U.S. Bank','042000013':'U.S. Bank',
-  '074900783':'U.S. Bank','081904808':'U.S. Bank','107002312':'U.S. Bank',
-  // PNC Bank
-  '043000096':'PNC Bank','041000124':'PNC Bank','054000030':'PNC Bank','267084199':'PNC Bank',
-  '031100089':'PNC Bank','043002900':'PNC Bank','083000108':'PNC Bank',
-  // Truist (BB&T + SunTrust)
-  '053101121':'Truist Bank','061000104':'Truist Bank','053201607':'Truist Bank','063102152':'Truist Bank',
-  '053100300':'Truist Bank','051503394':'Truist Bank','055002707':'Truist Bank',
-  // TD Bank
-  '031201360':'TD Bank','211370545':'TD Bank','026013673':'TD Bank','054001725':'TD Bank',
-  // Capital One
-  '051405515':'Capital One','056073502':'Capital One','022000020':'Capital One','065000090':'Capital One',
-  '265473812':'Capital One','111901014':'Capital One',
-  // Fifth Third
-  '042000314':'Fifth Third Bank','083000030':'Fifth Third Bank','063113057':'Fifth Third Bank',
-  '074908594':'Fifth Third Bank','043000282':'Fifth Third Bank',
-  // Regions Bank
-  '062000019':'Regions Bank','063104668':'Regions Bank','065000090':'Regions Bank','084003997':'Regions Bank',
-  // KeyBank
-  '041001039':'KeyBank','307070005':'KeyBank','125200879':'KeyBank','323271615':'KeyBank',
-  // Huntington
-  '044000024':'Huntington National Bank','041215663':'Huntington National Bank','072403473':'Huntington National Bank',
-  // Ally Bank
-  '124003116':'Ally Bank',
-  // Discover Bank
-  '031100649':'Discover Bank',
-  // HSBC
-  '022000020':'HSBC Bank USA','021001088':'HSBC Bank USA',
-  // Charles Schwab
-  '121202211':'Charles Schwab Bank',
-  // American Express
-  '124085066':'American Express National Bank',
-  // Navy Federal Credit Union
-  '256074974':'Navy Federal Credit Union',
-  // USAA
-  '314074269':'USAA Federal Savings Bank',
-  // PenFed
-  '256078446':'Pentagon Federal Credit Union',
-  // Citizens Bank
-  '011500120':'Citizens Bank','241070417':'Citizens Bank','021313103':'Citizens Bank',
-  // M&T Bank
-  '022000046':'M&T Bank','052000113':'M&T Bank','031302955':'M&T Bank',
-  // BMO Harris
-  '071025661':'BMO Harris Bank',
-  // First Republic
-  '321081669':'First Republic Bank',
-  // Silicon Valley Bank
-  '121140399':'Silicon Valley Bank',
-  // Zelle-common smaller banks
-  '063109935':'BankUnited','063114030':'BankUnited','063191001':'Regions Bank',
-  '102101645':'FirstBank','107089685':'FirstBank',
-  '323271615':'Umpqua Bank','123301951':'Umpqua Bank',
-  // Popular NY/NJ
-  '221272303':'Valley National Bank','221379578':'Valley National Bank',
-  // Chime (via Bancorp / Stride)
-  '031101279':'The Bancorp Bank','124085244':'Stride Bank',
-  // SoFi
-  '031101334':'SoFi Bank','254074049':'SoFi Bank'
-};
+/* ROUTING_LOOKUP is loaded from routing-lookup.js — full FedACH directory
+   (18k+ US banks) generated from Moov's open-source github.com/moov-io/fed
+   dataset which mirrors the Federal Reserve FedACH Participants Directory. */
 /* Look up bank name from ABA routing number. Only populates if empty so a manual
    entry isn't overwritten. If not in the local table, does nothing silently. */
 function lookupBankFromRouting(rn){
@@ -1138,26 +1059,22 @@ function fetchCountiesForPlaces(places,prefix,saved){
 
 function addMemberRow(data){
   var uid='m'+Date.now()+Math.floor(Math.random()*1000);
-  var wrap=document.createElement('div');wrap.className='member-row-data member-two-row';
-  wrap.style.cssText='padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-alt);margin-bottom:8px;';
-  wrap.innerHTML=
-    '<div style="display:grid;grid-template-columns:1.4fr 0.3fr 1.4fr 0.9fr 0.7fr 0.7fr 0.8fr 30px;gap:8px;align-items:end;margin-bottom:8px;">'+
-      mk('First Name','firstName',data)+mkS('MI','mi',data)+mk('Last Name','lastName',data)+
-      mkSel('Relation','relation',['','Spouse','Child','Mother','Father','Other'],data)+
-      mkSel('Married','married',['','Yes','No'],data)+
-      mkSel('Gender','gender',['','M','F'],data)+
-      mkSel('Insured','insured',['','Yes','No'],data)+
-      '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this household member?\',updateMemberCount)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>'+
-    '</div>'+
-    '<div style="display:grid;grid-template-columns:1.2fr 0.6fr 1.2fr 0.7fr 0.7fr 0.7fr;gap:8px;align-items:end;">'+
-      '<div class="field"><label>DOB</label><input type="date" data-field="dob" id="'+uid+'_dob" value="'+(data&&data.dob||'')+'" onchange="calcMemberAge(this,\''+uid+'_age\')"></div>'+
-      '<div class="field"><label>Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;" value="'+(data&&data.age||'')+'"></div>'+
-      '<div class="field"><label>SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11"></div>'+
-      '<div class="field"><label>Height</label><input data-field="height" value="'+(data&&data.height||'')+'" placeholder="5\'10&quot;" oninput="fmtHeight(this)"></div>'+
-      '<div class="field"><label>Weight</label><input data-field="weight" value="'+(data&&data.weight||'')+'" placeholder="lbs"></div>'+
-      mkSel('Tobacco','tobacco',['','Yes','No'],data)+
-    '</div>';
-  document.getElementById('membersContainer').appendChild(wrap);
+  var div=document.createElement('div');div.className='member-row-data member-row-compact';
+  div.style.cssText='display:grid;grid-template-columns:1fr 0.25fr 1fr 0.7fr 0.5fr 0.5fr 0.5fr 0.4fr 0.4fr 0.85fr 0.4fr 1fr 0.5fr 30px;gap:5px;align-items:end;margin-bottom:6px;';
+  div.innerHTML=
+    mk('First Name','firstName',data)+mkS('MI','mi',data)+mk('Last Name','lastName',data)+
+    mkSel('Relation','relation',['','Spouse','Child','Mother','Father','Other'],data)+
+    mkSel('Married','married',['','Yes','No'],data)+
+    mkSel('Gender','gender',['','M','F'],data)+
+    mkSel('Tobacco','tobacco',['','Yes','No'],data)+
+    '<div class="field"><label>Height</label><input data-field="height" value="'+(data&&data.height||'')+'" placeholder="5\'10&quot;" oninput="fmtHeight(this)"></div>'+
+    '<div class="field"><label>Weight</label><input data-field="weight" value="'+(data&&data.weight||'')+'" placeholder="lbs"></div>'+
+    '<div class="field"><label>DOB</label><input type="date" data-field="dob" id="'+uid+'_dob" value="'+(data&&data.dob||'')+'" onchange="calcMemberAge(this,\''+uid+'_age\')"></div>'+
+    '<div class="field"><label>Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;" value="'+(data&&data.age||'')+'"></div>'+
+    '<div class="field"><label>SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11"></div>'+
+    mkSel('Insured','insured',['','Yes','No'],data)+
+    '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this household member?\',updateMemberCount)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+  document.getElementById('membersContainer').appendChild(div);
   updateMemberCount();
 }
 function mk(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"></div>';}

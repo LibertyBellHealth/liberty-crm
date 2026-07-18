@@ -60,6 +60,20 @@
 .entity-table thead th{padding:8px 12px;}
 .entity-table tbody td{padding:9px 12px;}
 
+/* Compact one-line household member row — override the roomy .field defaults
+   so 14 columns fit in the form width. */
+.member-row-compact .field label{font-size:10px;}
+.member-row-compact .field input,.member-row-compact .field select{padding:4px 6px;font-size:12px;min-width:0;}
+.member-row-compact .field{min-width:0;}
+.member-row-compact .field input,.member-row-compact .field select{overflow:hidden;text-overflow:ellipsis;}
+
+/* Fix reveal-wrap layout so the copy button sits INSIDE the input's box on the right,
+   not as a separate sibling that spills outside. */
+.reveal-wrap{position:relative;display:block;}
+.reveal-wrap input{width:100%;padding-right:32px;}
+.reveal-wrap .icon-btn{position:absolute;right:2px;top:50%;transform:translateY(-50%);margin:0;background:transparent;}
+.reveal-wrap .icon-btn:hover{background:var(--surface-hover);}
+
 /* Hover-only copy button attached to every text field on the client edit form */
 .field-copyable{position:relative;}
 .field-copyable .copy-hover-btn{
