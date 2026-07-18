@@ -1704,6 +1704,73 @@ function addCarrier(){
     renderCarriers();
   });
 }
+/* Universal quick-search modal (Cmd+K / Ctrl+K). Fuzzy-searches clients by name,
+   phone, email, DOB, plan carrier. Keyboard nav + Enter to open. */
+var _quickSearchIdx=0;
+function openQuickSearch(){
+  var m=document.getElementById('quickSearchModal');if(!m)return;
+  m.style.display='flex';
+  var inp=document.getElementById('quickSearchInput');
+  inp.value='';_quickSearchIdx=0;
+  renderQuickSearch();
+  setTimeout(function(){inp.focus();},30);
+}
+function closeQuickSearch(){var m=document.getElementById('quickSearchModal');if(m)m.style.display='none';}
+function renderQuickSearch(){
+  var q=(document.getElementById('quickSearchInput').value||'').trim().toLowerCase();
+  var box=document.getElementById('quickSearchResults');if(!box)return;
+  var results=(clients||[]).filter(function(c){
+    if(!q)return true;
+    var hay=[
+      (c.f_firstName||'')+' '+(c.f_lastName||''),
+      c.f_phone||'',c.f_email||'',c.f_dob||'',
+      c.f_planCarrier||'',c.f_planType||'',c.f_agent||''
+    ].join(' ').toLowerCase();
+    return hay.indexOf(q)!==-1;
+  }).slice(0,10);
+  if(_quickSearchIdx>=results.length)_quickSearchIdx=Math.max(0,results.length-1);
+  if(!results.length){
+    box.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">'+(q?'No clients match "'+q+'"':'Start typing to search '+(clients.length||0)+' clients')+'</div>';
+    return;
+  }
+  box.innerHTML=results.map(function(c,i){
+    var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()||'Unnamed';
+    var sub=[c.f_phone,c.f_email,c.f_dob].filter(Boolean).join(' · ');
+    var meta=[c.f_planType,c.f_planCarrier,c.f_agent].filter(Boolean).join(' · ');
+    var active=i===_quickSearchIdx;
+    return '<div class="qs-row" data-id="'+c._id+'" onmouseenter="_quickSearchIdx='+i+';renderQuickSearch();" onmousedown="pickQuickSearch()" style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #f0f3f7;'+(active?'background:var(--accent-tint);':'')+'">'+
+      '<div style="font-weight:600;font-size:13px;color:var(--text);">'+name+'</div>'+
+      (sub?'<div style="font-size:11px;color:var(--text-muted);margin-top:1px;">'+sub+'</div>':'')+
+      (meta?'<div style="font-size:11px;color:var(--text-subtle);margin-top:1px;">'+meta+'</div>':'')+
+      '</div>';
+  }).join('');
+}
+function pickQuickSearch(){
+  var q=(document.getElementById('quickSearchInput').value||'').trim().toLowerCase();
+  var results=(clients||[]).filter(function(c){
+    if(!q)return true;
+    var hay=[(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_phone||'',c.f_email||'',c.f_dob||'',c.f_planCarrier||'',c.f_planType||'',c.f_agent||''].join(' ').toLowerCase();
+    return hay.indexOf(q)!==-1;
+  }).slice(0,10);
+  var c=results[_quickSearchIdx];if(!c)return;
+  closeQuickSearch();
+  editClient(c._id);
+}
+// Global keybindings: Cmd/Ctrl+K opens, Esc closes, arrows navigate
+document.addEventListener('keydown',function(e){
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'&&_apiToken){
+    e.preventDefault();openQuickSearch();return;
+  }
+  var m=document.getElementById('quickSearchModal');
+  if(!m||m.style.display==='none')return;
+  if(e.key==='Escape'){e.preventDefault();closeQuickSearch();}
+  else if(e.key==='ArrowDown'){e.preventDefault();_quickSearchIdx++;renderQuickSearch();}
+  else if(e.key==='ArrowUp'){e.preventDefault();_quickSearchIdx=Math.max(0,_quickSearchIdx-1);renderQuickSearch();}
+  else if(e.key==='Enter'){e.preventDefault();pickQuickSearch();}
+});
+// Click outside the modal-card closes it
+document.getElementById('quickSearchModal')&&document.getElementById('quickSearchModal').addEventListener('mousedown',function(e){if(e.target.id==='quickSearchModal')closeQuickSearch();});
+
 /* In-app prompt modal — replaces native prompt() dialogs.
    Usage: showPrompt('Title','Label:','default val',function(val){...}, {okText:'Add'}) */
 function showPrompt(title,message,defaultVal,onOk,opts){
