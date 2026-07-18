@@ -537,6 +537,7 @@ function clearForm(){
   var ms=document.getElementById('mailingAddressSection');if(ms)ms.style.display='none';
   var at=document.getElementById('f_addressType');if(at){at.value='Mailing';updateMailingTitle();}
   var rb=document.getElementById('f_referredBy');if(rb){rb.value='';rb.style.borderColor='';rb.title='';}_referrerPicked=false;
+  var st=document.getElementById('f_status');if(st)st.value='Active';
   var rbf=document.getElementById('referredByField');if(rbf)rbf.style.display='none';
   var mf=document.getElementById('medicareFields');if(mf)mf.style.display='none';
   var mcd=document.getElementById('medicaidFields');if(mcd)mcd.style.display='none';
@@ -577,6 +578,12 @@ function getFormData(){
     var canon=canonicalReferrerName(refBy);
     data.f_leadSource='Referral: '+(canon||refBy);
   }
+  // Status packing: strip any existing [STATUS:X] prefix from notes, then
+  // prepend the current status. Kept invisible in the UI (extracted on load).
+  var stEl=document.getElementById('f_status');
+  var status=stEl?(stEl.value||'Active'):'Active';
+  var notes=(data.f_notes||'').replace(/^\[STATUS:[^\]]+\]\n?/i,'');
+  data.f_notes='[STATUS:'+status+']\n'+notes;
   // Address type packing: prefix bill_address with [BILL] or [BOTH] when the user
   // marked the extra address as billing or both. Mailing (default) gets no prefix
   // for cleanliness. Only applies if the address is actually populated.
@@ -624,6 +631,21 @@ function setFormData(data){
       atEl.value='Mailing';
     }
     updateMailingTitle();
+  }
+  // Unpack packed status prefix in notes and drive the Status dropdown.
+  // Old clients without a prefix default to Active.
+  var stEl=document.getElementById('f_status');
+  if(stEl){
+    var rawNotes=data.f_notes||'';
+    var stMatch=rawNotes.match(/^\[STATUS:([^\]]+)\]\n?/i);
+    if(stMatch){
+      stEl.value=stMatch[1].trim();
+      // Strip the prefix from the visible notes field
+      var notesInput=document.getElementById('f_notes');
+      if(notesInput)notesInput.value=rawNotes.replace(/^\[STATUS:[^\]]+\]\n?/i,'');
+    } else {
+      stEl.value='Active';
+    }
   }
   // Unpack packed referral: "Referral: John Smith" → leadSource="Referral", referredBy="John Smith"
   var lsEl=document.getElementById('f_leadSource'),rbEl=document.getElementById('f_referredBy');

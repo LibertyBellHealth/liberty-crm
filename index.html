@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718h">
+<link rel="stylesheet" href="styles.css?v=20260718i">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -415,7 +415,7 @@
           <!-- 12. AGENT INFORMATION -->
           <div class="form-section">
             <div class="form-section-title">Agent Information</div>
-            <div class="fg" style="grid-template-columns:1.1fr 1.2fr 1.4fr 1fr 1fr;gap:10px;align-items:end;">
+            <div class="fg" style="grid-template-columns:1fr 1.2fr 1.4fr 1fr;gap:10px;align-items:end;">
               <div class="field"><label>Agent</label><select id="f_agent"><option>Thomas Jaboro</option><option>Paul Jaboro Jr.</option></select></div>
               <div class="field"><label>Lead Source</label>
                 <input id="f_leadSource" list="leadSourceOptions" placeholder="Select or type..." autocomplete="off" oninput="toggleReferredBy()">
@@ -427,14 +427,25 @@
                 <div class="autocomplete-list" id="referrerPicker"></div>
               </div>
               <div class="field"><label>Lead Date</label><input type="date" id="f_leadDate" oninput="clampDate(this)"></div>
-              <div class="field"><label>Renewed</label><select id="f_renewed"><option></option><option>2026 Renewed</option><option>Not Renewed</option></select></div>
             </div>
           </div>
 
           <!-- 12b. MOTHERS MAIDEN -->
           <div class="form-section">
             <div class="form-section-title">Additional Information</div>
-            <div class="fg g2">
+            <div class="fg" style="grid-template-columns:1fr 1fr 1fr;gap:10px;">
+              <div class="field"><label>Status</label>
+                <select id="f_status">
+                  <option value="Active">Active</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Inactive">Inactive</option>
+                  <option value="Terminated">Terminated</option>
+                  <option value="Lost">Lost</option>
+                  <option value="Cancelled">Cancelled</option>
+                  <option value="Deceased">Deceased</option>
+                </select>
+              </div>
+              <div class="field"><label>Renewed</label><select id="f_renewed"><option></option><option>2026 Renewed</option><option>Not Renewed</option></select></div>
               <div class="field"><label>Mother's Maiden Name</label><input id="f_mothersMaiden"></div>
             </div>
           </div>
@@ -831,8 +842,8 @@
   </div>
 </div>
 
-<script src="routing-lookup.js?v=20260718h"></script>
-<script src="app.js?v=20260718h"></script>
+<script src="routing-lookup.js?v=20260718i"></script>
+<script src="app.js?v=20260718i"></script>
 
 </body>
 </html>
