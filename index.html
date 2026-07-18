@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718j">
+<link rel="stylesheet" href="styles.css?v=20260718k">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -151,32 +151,28 @@
     <div id="viewNew" class="view-panel" style="display:none;">
       <div class="topbar"><h2>New Application</h2></div>
       <div style="display:flex;align-items:center;justify-content:center;padding:60px 20px;">
-        <div style="background:#fff;border-radius:8px;padding:40px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.1);max-width:400px;width:100%;">
+        <div style="background:#fff;border-radius:8px;padding:40px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.1);max-width:460px;width:100%;">
           <h3 style="margin-bottom:6px;font-size:16px;color:#1a3a5c;">Select Application Type</h3>
           <p style="font-size:12px;color:#666;margin-bottom:24px;">Choose the type of application to create</p>
-          <div style="display:flex;gap:16px;justify-content:center;">
+          <div style="display:flex;flex-direction:column;gap:10px;align-items:stretch;">
             <button class="btn btn-blue" style="padding:16px 28px;font-size:15px;" onclick="startNewApp('health')">&#10084; Health App</button>
-            <button class="btn" style="padding:16px 28px;font-size:15px;background:#e8f0f7;border-color:#1a3a5c;color:#1a3a5c;" onclick="startNewApp('life')">&#128196; Life App</button>
-          </div>
-          <div style="margin-top:24px;padding-top:20px;border-top:1px solid #eee;">
-            <button class="btn" style="font-size:12px;" onclick="openDiscoveryPasteModal()">Paste Discovery Notes</button>
-            <div style="font-size:11px;color:#888;margin-top:8px;">Skip the form — paste your call notes and I'll fill it in.</div>
-          </div>
-        </div>
-      </div>
-      <div id="discoveryPasteModal" class="modal-backdrop" style="display:none;">
-        <div class="modal-card" style="max-width:600px;">
-          <div class="modal-title">Paste Discovery Notes</div>
-          <div class="modal-hint">Paste your filled-in discovery template. Blank fields are skipped. Spouse and Child blocks are only added when they have data. Rx and doctor lines follow the same paste patterns as their own sections.</div>
-          <textarea id="discoveryPasteInput" rows="18" placeholder="Lead Source-&#10;Phone number-&#10;Name-&#10;DOB-&#10;..."></textarea>
-          <div class="modal-actions">
-            <button type="button" class="btn" onclick="closeDiscoveryPasteModal()">Cancel</button>
-            <button type="button" class="btn btn-green" onclick="importDiscoveryPaste()">Import → New Client</button>
+            <button class="btn" style="padding:8px 14px;font-size:12px;" onclick="openDiscoveryPasteModal()">Paste Discovery Notes (Health)</button>
+            <div style="font-size:11px;color:#888;margin-bottom:8px;">Skip the form — paste your call notes and I'll fill it in.</div>
+            <div style="border-top:1px solid #eee;padding-top:14px;">
+              <button class="btn" style="padding:16px 28px;font-size:15px;background:#e8f0f7;border-color:#1a3a5c;color:#1a3a5c;width:100%;" onclick="startNewApp('life')">&#128196; Life App</button>
+            </div>
           </div>
         </div>
       </div>
-      <div style="display:none;"><!-- swallowed markup below preserved for structure -->
-          <button class="btn" style="margin-top:16px;font-size:11px;" onclick="showView('clients')">Cancel</button>
+    </div>
+    <div id="discoveryPasteModal" class="modal-backdrop" style="display:none;">
+      <div class="modal-card" style="max-width:600px;">
+        <div class="modal-title">Paste Discovery Notes</div>
+        <div class="modal-hint">Paste your filled-in discovery template. Blank fields are skipped. Spouse and Child blocks are only added when they have data. Rx and doctor lines follow the same paste patterns as their own sections.</div>
+        <textarea id="discoveryPasteInput" rows="18" placeholder="Lead Source-&#10;Phone number-&#10;Name-&#10;DOB-&#10;..."></textarea>
+        <div class="modal-actions">
+          <button type="button" class="btn" onclick="closeDiscoveryPasteModal()">Cancel</button>
+          <button type="button" class="btn btn-green" onclick="importDiscoveryPaste()">Import → New Client</button>
         </div>
       </div>
     </div>
@@ -860,8 +856,8 @@
   </div>
 </div>
 
-<script src="routing-lookup.js?v=20260718j"></script>
-<script src="app.js?v=20260718j"></script>
+<script src="routing-lookup.js?v=20260718k"></script>
+<script src="app.js?v=20260718k"></script>
 
 </body>
 </html>
