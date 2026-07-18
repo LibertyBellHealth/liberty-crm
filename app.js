@@ -318,6 +318,9 @@ function startColResize(e,col){
 }
 function clientPageSizeChange(){var s=document.getElementById('clientPageSize');var v=s.value;if(v==='all')_clientPageSize=Infinity;else _clientPageSize=parseInt(v)||25;_clientPage=1;try{localStorage.setItem('lch_client_page_size',v);}catch(e){}renderClientTable(_clientFilteredCache.slice());}
 function goToClientPage(n){_clientPage=n;renderClientTable(_clientFilteredCache.slice());}
+function toggleKebab(e){e.stopPropagation();var m=document.getElementById('clientKebabMenu');if(m)m.classList.toggle('open');}
+function closeKebab(){var m=document.getElementById('clientKebabMenu');if(m)m.classList.remove('open');}
+document.addEventListener('click',function(e){var w=document.querySelector('.kebab-wrap');if(w&&!w.contains(e.target))closeKebab();});
 
 function renderClientTable(data){
   var tbody=document.getElementById('clientTableBody');tbody.innerHTML='';

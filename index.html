@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717g">
+<link rel="stylesheet" href="styles.css?v=20260717h">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -52,7 +52,12 @@
         <div class="titles"><h1>Clients</h1></div>
         <div class="actions">
           <button class="btn btn-red" id="bulkDeleteBtn" onclick="bulkDelete()" style="display:none;">Delete Selected</button>
-          <button class="btn" onclick="exportExcel()">Export Excel</button>
+          <div class="kebab-wrap">
+            <button class="btn kebab-btn" onclick="toggleKebab(event)" aria-label="More actions" title="More actions">&#8942;</button>
+            <div class="kebab-menu" id="clientKebabMenu">
+              <button onclick="exportExcel();closeKebab();">Export to Excel</button>
+            </div>
+          </div>
           <button class="btn btn-green" onclick="showView('new')">+ New Client</button>
         </div>
       </div>
@@ -828,7 +833,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717g"></script>
+<script src="app.js?v=20260717h"></script>
 
 </body>
 </html>

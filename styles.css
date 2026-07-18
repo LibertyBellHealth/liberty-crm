@@ -60,6 +60,15 @@
 .entity-table thead th{padding:8px 12px;}
 .entity-table tbody td{padding:9px 12px;}
 
+/* Kebab (⋮) menu — collapses utility actions on entity headers */
+.kebab-wrap{position:relative;display:inline-block;}
+.kebab-btn{padding:5px 10px;font-size:18px;line-height:1;color:var(--text-muted);}
+.kebab-btn:hover{color:var(--text);background:var(--surface-hover);}
+.kebab-menu{position:absolute;top:calc(100% + 4px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.08);min-width:160px;z-index:100;display:none;padding:4px 0;}
+.kebab-menu.open{display:block;}
+.kebab-menu button{display:block;width:100%;text-align:left;padding:8px 14px;background:none;border:none;color:var(--text);font-size:12px;font-family:Arial,sans-serif;cursor:pointer;}
+.kebab-menu button:hover{background:var(--surface-hover);color:var(--accent);}
+
 /* Pagination buttons */
 .pg-btn{background:none;border:1px solid var(--border);color:var(--text);cursor:pointer;padding:4px 9px;font-size:12px;font-family:Arial,sans-serif;border-radius:4px;min-width:28px;line-height:1;}
 .pg-btn:hover:not(:disabled){background:var(--surface-hover);border-color:var(--accent);}
