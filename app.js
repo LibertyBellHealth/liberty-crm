@@ -2322,48 +2322,11 @@ function deleteClientDoc(clientId,encodedName){
 }
 
 // initMSAL called below
-var _addrTimer={};
-function addrAC(el,prefix){
-  var v=el.value.trim();
-  var listId=prefix+'AddrList';
-  var list=document.getElementById(listId);
-  if(!list)return;
-  if(v.length<3){list.style.display='none';return;}
-  clearTimeout(_addrTimer[prefix]);
-  _addrTimer[prefix]=setTimeout(function(){
-    fetch('https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&countrycodes=us&q='+encodeURIComponent(v),{headers:{'Accept-Language':'en-US,en'}})
-    .then(function(r){return r.json();})
-    .then(function(results){
-      list.innerHTML='';
-      if(!results||!results.length){list.style.display='none';return;}
-      results.forEach(function(r){
-        var addr=r.address||{};
-        var street=(addr.house_number?addr.house_number+' ':'')+( addr.road||addr.pedestrian||'');
-        var city=addr.city||addr.town||addr.village||addr.hamlet||'';
-        var state=addr.state||'';var zip=addr.postcode||'';
-        if(!street)return;
-        var d=document.createElement('div');
-        d.innerHTML='<div class="addr-main">'+escHtml(street)+'</div><div class="addr-sub">'+escHtml(city)+(state?', '+escHtml(state):'')+(zip?' '+escHtml(zip):'')+'</div>';
-        d.addEventListener('mousedown',function(e){
-          e.preventDefault();
-          el.value=street;
-          list.style.display='none';
-          if(zip){
-            var zipEl=document.getElementById('f_'+prefix+'Zip');
-            var cityEl=document.getElementById('f_'+prefix+'City');
-            var stEl=document.getElementById('f_'+prefix+'St');
-            if(zipEl)zipEl.value=zip;
-            if(cityEl)cityEl.value=city;
-            if(stEl)stEl.value=addr.state_code||addr['ISO3166-2-lvl4']||state;
-            if(zip.replace(/\D/g,'').length===5)restoreCounty(zip,prefix,addr.county||'');
-          }
-        });
-        list.appendChild(d);
-      });
-      if(list.children.length>0)list.style.display='block';else list.style.display='none';
-    }).catch(function(){list.style.display='none';});
-  },350);
-}
+/* Street-address autocomplete REMOVED 2026-07-18. It sent partial patient street
+   addresses to nominatim.openstreetmap.org — a third party with no BAA, in a URL
+   query string. City/state/county still fill from the ZIP field (lookupZip), which
+   uses the bundled ZIP_COUNTIES dataset. Do not reintroduce a client-side geocoder;
+   proxy through our own API if this is ever wanted again. */
 
 // ===================== ADVANCED SEARCH (canonical - with create date) =====================
 var _advSearchResults=[];
