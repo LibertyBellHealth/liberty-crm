@@ -513,9 +513,10 @@ function clearForm(){
     var el=document.getElementById('f_'+f);if(!el)return;
     if(el.type==='checkbox')el.checked=false;else el.value='';
   });
-  ['membersContainer','doctorsContainer','medsContainer','ancilContainer'].forEach(function(id){
+  ['membersContainer','doctorsContainer','medsContainer','ancilContainer','otherIncomeContainer'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.innerHTML='';
   });
+  updateOtherIncomeAddBtn();
   var ag=document.getElementById('f_agent');if(ag)ag.value=localStorage.getItem('crm_default_agent')||'Thomas Jaboro';
   var sa=document.getElementById('f_sameAddress');if(sa)sa.checked=false;
   var ms=document.getElementById('mailingAddressSection');if(ms)ms.style.display='block';
@@ -540,6 +541,13 @@ function getFormData(){
   data.doctors=[];document.querySelectorAll('.doctor-row-data').forEach(function(row){var d={};row.querySelectorAll('[data-field]').forEach(function(el){d[el.dataset.field]=el.value;});data.doctors.push(d);});
   data.meds=[];document.querySelectorAll('.med-row-data').forEach(function(row){var m={};row.querySelectorAll('[data-field]').forEach(function(el){m[el.dataset.field]=el.value;});data.meds.push(m);});
   data.ancilPlans=[];document.querySelectorAll('.ancil-row-data').forEach(function(row){var a={};row.querySelectorAll('[data-field]').forEach(function(el){a[el.dataset.field]=el.value;});data.ancilPlans.push(a);});
+  // Dynamic other-income rows → pack into the 3 legacy DB columns (max 3 enforced in UI)
+  var oiRows=document.querySelectorAll('#otherIncomeContainer .oi-row');
+  for(var i=0;i<3;i++){
+    var row=oiRows[i];
+    data['f_otherIncome'+(i+1)]=row?row.querySelector('.oi-src').value:'';
+    data['f_otherIncomeAmt'+(i+1)]=row?row.querySelector('.oi-amt').value:'';
+  }
   return data;
 }
 function setFormData(data){
@@ -552,6 +560,8 @@ function setFormData(data){
   if(data.meds&&data.meds.length)data.meds.forEach(function(m){addMedRow(m);});else addMedRow();
   document.getElementById('ancilContainer').innerHTML='';
   if(data.ancilPlans&&data.ancilPlans.length)data.ancilPlans.forEach(function(a){addAncilRow(a);});
+  var oiC=document.getElementById('otherIncomeContainer');
+  if(oiC){oiC.innerHTML='';for(var i=1;i<=3;i++){var s=data['f_otherIncome'+i],a=data['f_otherIncomeAmt'+i];if(s||a)addOtherIncomeRow({source:s||'',amount:a||''});}updateOtherIncomeAddBtn();}
   var mcChecked=data.f_hasMedicare===true||data.f_hasMedicare==='true'||data.f_hasMedicare==='1';
   var mcdChecked=data.f_hasMedicaid===true||data.f_hasMedicaid==='true'||data.f_hasMedicaid==='1';
   document.getElementById('f_hasMedicare').checked=mcChecked;
@@ -637,9 +647,36 @@ function toggleMedicare(){document.getElementById('medicareFields').style.displa
 function toggleMedicaid(){document.getElementById('medicaidFields').style.display=document.getElementById('f_hasMedicaid').checked?'block':'none';}
 function toggleMailingAddress(){document.getElementById('mailingAddressSection').style.display=document.getElementById('f_sameAddress').checked?'none':'block';}
 function calcTotalIncome(){
-  var ids=['f_primaryIncome','f_spouseIncome','f_otherIncomeAmt1','f_otherIncomeAmt2','f_otherIncomeAmt3'];
-  var t=ids.reduce(function(s,id){var el=document.getElementById(id);return s+(el?parseFloat(el.value.replace(/[^0-9.]/g,''))||0:0);},0);
-  document.getElementById('f_totalIncome').value=t>0?'$'+t.toLocaleString():'';
+  var t=0;
+  ['f_primaryIncome','f_spouseIncome'].forEach(function(id){var el=document.getElementById(id);if(el)t+=parseFloat((el.value||'').replace(/[^0-9.]/g,''))||0;});
+  document.querySelectorAll('#otherIncomeContainer .oi-amt').forEach(function(el){t+=parseFloat((el.value||'').replace(/[^0-9.]/g,''))||0;});
+  var out=document.getElementById('f_totalIncome');if(out)out.value=t>0?'$'+t.toLocaleString():'';
+}
+var OTHER_INCOME_MAX=3;
+function addOtherIncomeRow(data){
+  var c=document.getElementById('otherIncomeContainer');if(!c)return;
+  var rows=c.querySelectorAll('.oi-row');
+  if(rows.length>=OTHER_INCOME_MAX){toast('Maximum '+OTHER_INCOME_MAX+' other income sources','info');return;}
+  data=data||{};
+  var row=document.createElement('div');
+  row.className='oi-row fg';
+  row.style.cssText='grid-template-columns:2fr 0.8fr 30px;gap:8px;margin-bottom:8px;align-items:end;';
+  row.innerHTML='<div class="field"><label>Other Income Source</label><input class="oi-src" value="'+(data.source||'').replace(/"/g,'&quot;')+'"></div>'+
+    '<div class="field"><label>Income</label><input class="oi-amt" placeholder="$" value="'+(data.amount||'').replace(/"/g,'&quot;')+'" oninput="fmtMoney(this);calcTotalIncome()" onblur="fmtMoneyBlur(this);calcTotalIncome()"></div>'+
+    '<button type="button" class="icon-btn" onclick="removeOtherIncomeRow(this)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+  c.appendChild(row);
+  updateOtherIncomeAddBtn();
+  calcTotalIncome();
+}
+function removeOtherIncomeRow(btn){
+  var row=btn.closest('.oi-row');if(row)row.remove();
+  updateOtherIncomeAddBtn();
+  calcTotalIncome();
+}
+function updateOtherIncomeAddBtn(){
+  var c=document.getElementById('otherIncomeContainer');var b=document.getElementById('addOtherIncomeBtn');
+  if(!c||!b)return;
+  b.style.display=c.querySelectorAll('.oi-row').length>=OTHER_INCOME_MAX?'none':'';
 }
 function calcTotalMonthly(){
   var h=parseFloat((document.getElementById('f_premium').value||'').replace(/[^0-9.]/g,''))||0;

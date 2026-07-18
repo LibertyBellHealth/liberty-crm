@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717i">
+<link rel="stylesheet" href="styles.css?v=20260717j">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -361,19 +361,9 @@
               <div class="field"><label>Spouse Occupation / Employer</label><input id="f_spouseEmployer"></div>
               <div class="field"><label>Spouse Income</label><input id="f_spouseIncome" placeholder="$" oninput="fmtMoney(this);calcTotalIncome()" onblur="fmtMoneyBlur(this);calcTotalIncome()"></div>
             </div>
-            <div class="fg" style="grid-template-columns:2fr 0.8fr;gap:8px;margin-bottom:8px;">
-              <div class="field"><label>Other Income Source 1</label><input id="f_otherIncome1"></div>
-              <div class="field"><label>Income</label><input id="f_otherIncomeAmt1" placeholder="$" oninput="fmtMoney(this);calcTotalIncome()" onblur="fmtMoneyBlur(this);calcTotalIncome()"></div>
-            </div>
-            <div class="fg" style="grid-template-columns:2fr 0.8fr;gap:8px;margin-bottom:8px;">
-              <div class="field"><label>Other Income Source 2</label><input id="f_otherIncome2"></div>
-              <div class="field"><label>Income</label><input id="f_otherIncomeAmt2" placeholder="$" oninput="fmtMoney(this);calcTotalIncome()" onblur="fmtMoneyBlur(this);calcTotalIncome()"></div>
-            </div>
-            <div class="fg" style="grid-template-columns:2fr 0.8fr;gap:8px;margin-bottom:8px;">
-              <div class="field"><label>Other Income Source 3</label><input id="f_otherIncome3"></div>
-              <div class="field"><label>Income</label><input id="f_otherIncomeAmt3" placeholder="$" oninput="fmtMoney(this);calcTotalIncome()" onblur="fmtMoneyBlur(this);calcTotalIncome()"></div>
-            </div>
-            <div class="field" style="max-width:150px;"><label>Total Income (Auto)</label><input id="f_totalIncome" readonly style="font-weight:bold;"></div>
+            <div id="otherIncomeContainer"></div>
+            <button type="button" class="btn add-row-btn" id="addOtherIncomeBtn" onclick="addOtherIncomeRow()">+ Add Other Income</button>
+            <div class="field" style="max-width:150px;margin-top:10px;"><label>Total Income (Auto)</label><input id="f_totalIncome" readonly style="font-weight:bold;"></div>
           </div>
 
           <!-- 10. DOCTORS -->
@@ -835,7 +825,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717i"></script>
+<script src="app.js?v=20260717j"></script>
 
 </body>
 </html>
