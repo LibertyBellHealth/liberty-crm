@@ -60,6 +60,19 @@
 .entity-table thead th{padding:8px 12px;}
 .entity-table tbody td{padding:9px 12px;}
 
+/* Hover-only copy button attached to every text field on the client edit form */
+.field-copyable{position:relative;}
+.field-copyable .copy-hover-btn{
+  position:absolute;right:4px;bottom:4px;width:20px;height:20px;padding:0;
+  border:none;background:rgba(255,255,255,0.85);color:var(--text-subtle);
+  border-radius:3px;cursor:pointer;display:none;align-items:center;justify-content:center;
+  transition:color 0.12s,background 0.12s;
+}
+.field-copyable:hover .copy-hover-btn,.field-copyable:focus-within .copy-hover-btn{display:flex;}
+.field-copyable .copy-hover-btn:hover{color:var(--accent);background:#fff;}
+.field-copyable .copy-hover-btn.copied{color:var(--dot-active);}
+.field-copyable input{padding-right:26px !important;}
+
 /* Modern action icons (phone / mail / copy) — replaces old emoji buttons */
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:none;background:transparent;color:var(--text-subtle);border-radius:4px;cursor:pointer;vertical-align:middle;margin-left:2px;transition:background 0.12s,color 0.12s;text-decoration:none;}
 .icon-btn:hover{background:var(--surface-hover);color:var(--accent);}

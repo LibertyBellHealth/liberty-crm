@@ -260,6 +260,7 @@ function _doShowView(v){
   if(vid)document.querySelector('.main').scrollTop=0;
   if(v==='clients')maybeRevalidateClients();
   if(v==='carriers')renderCarriers();
+  if(v==='form_edit'||v==='new')setTimeout(wireCopyableFields,50);
   if(v==='todo')renderTodos();
   if(v==='settings'){renderSettings();populateDefaultAgentSelect();}
   if(v==='advSearch')populateAdvSearchCarriers();
@@ -527,8 +528,8 @@ function clearForm(){
   });
   updateOtherIncomeAddBtn();
   var ag=document.getElementById('f_agent');if(ag)ag.value=localStorage.getItem('crm_default_agent')||'Thomas Jaboro';
-  var sa=document.getElementById('f_sameAddress');if(sa)sa.checked=false;
-  var ms=document.getElementById('mailingAddressSection');if(ms)ms.style.display='block';
+  var sa=document.getElementById('f_diffMailing');if(sa)sa.checked=false;
+  var ms=document.getElementById('mailingAddressSection');if(ms)ms.style.display='none';
   var mf=document.getElementById('medicareFields');if(mf)mf.style.display='none';
   var mcd=document.getElementById('medicaidFields');if(mcd)mcd.style.display='none';
   var wd=document.getElementById('waiveDentalField');if(wd)wd.style.display='none';
@@ -577,6 +578,10 @@ function setFormData(data){
   document.getElementById('f_hasMedicaid').checked=mcdChecked;
   document.getElementById('medicareFields').style.display=mcChecked?'block':'none';
   document.getElementById('medicaidFields').style.display=mcdChecked?'block':'none';
+  // Auto-reveal mailing address section if the client actually has one saved
+  var hasBill=!!(data.f_billAddress||data.f_billZip||data.f_billCity);
+  var diffCb=document.getElementById('f_diffMailing');
+  if(diffCb){diffCb.checked=hasBill;document.getElementById('mailingAddressSection').style.display=hasBill?'block':'none';}
   if(data.f_resZip)restoreCounty(data.f_resZip,'res',data.f_resCounty);
   if(data.f_billZip)restoreCounty(data.f_billZip,'bill',data.f_billCounty);
   updateMemberCount();checkWaiveDental();calcTotalMonthly();
@@ -661,7 +666,11 @@ function copyText(txt,btn){
 }
 function toggleMedicare(){document.getElementById('medicareFields').style.display=document.getElementById('f_hasMedicare').checked?'block':'none';}
 function toggleMedicaid(){document.getElementById('medicaidFields').style.display=document.getElementById('f_hasMedicaid').checked?'block':'none';}
-function toggleMailingAddress(){document.getElementById('mailingAddressSection').style.display=document.getElementById('f_sameAddress').checked?'none':'block';}
+function toggleMailingAddress(){
+  var cb=document.getElementById('f_diffMailing');
+  var sec=document.getElementById('mailingAddressSection');
+  if(sec&&cb)sec.style.display=cb.checked?'block':'none';
+}
 function calcTotalIncome(){
   var t=0;
   ['f_primaryIncome','f_spouseIncome'].forEach(function(id){var el=document.getElementById(id);if(el)t+=parseFloat((el.value||'').replace(/[^0-9.]/g,''))||0;});
@@ -871,6 +880,80 @@ function formatCardExp(el){
   if(v.length>=3)v=v.slice(0,2)+'/'+v.slice(2);
   el.value=v;
 }
+/* Detect card brand from first digit; only auto-select if Card Type is still blank
+   so a manual override sticks. 3→Amex, 4→Visa, 5→Mastercard, 6→Discover. */
+function autoDetectCardType(el){
+  var first=(el.value||'').replace(/\D/g,'').charAt(0);
+  var brand={'3':'Amex','4':'Visa','5':'Mastercard','6':'Discover'}[first];
+  if(!brand)return;
+  var sel=document.getElementById('f_cardType');
+  if(sel&&!sel.value)sel.value=brand;
+}
+/* Look up bank name from ABA routing number via routingnumbers.info (free, no key).
+   Only populates bank name if empty so a manual entry isn't overwritten. */
+function lookupBankFromRouting(rn){
+  var digits=(rn||'').replace(/\D/g,'');
+  if(digits.length!==9)return;
+  var bankInput=document.getElementById('f_bankName');
+  if(!bankInput||bankInput.value.trim())return;
+  fetch('https://www.routingnumbers.info/api/data.json?rn='+digits)
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(data&&data.code===200&&data.customer_name){
+        bankInput.value=data.customer_name;
+        markFormDirty();
+        toast('Bank identified: '+data.customer_name,'success');
+      }
+    }).catch(function(){});
+}
+/* Clamp date inputs so a 5+ digit year gets trimmed to 4 (browsers accept 6-digit years).
+   Also enforces 1900–2099 to catch obvious typos. */
+function clampDate(el){
+  var v=el.value||'';var m=v.match(/^(\d{4,})-(\d{2})-(\d{2})$/);
+  if(!m)return;
+  var y=parseInt(m[1]);
+  if(m[1].length>4||y<1900||y>2099){
+    y=Math.max(1900,Math.min(2099,parseInt(m[1].slice(0,4))||2000));
+    el.value=String(y).padStart(4,'0')+'-'+m[2]+'-'+m[3];
+  }
+}
+/* Carrier autocomplete — filters `carriers` array by prefix + substring match.
+   Populates the dropdown under the carrier input; click fills the field. */
+function carrierAC(el){
+  var q=(el.value||'').toLowerCase().trim();
+  var list=document.getElementById('carrierACList');if(!list)return;
+  if(!q){list.style.display='none';return;}
+  var matches=carriers.filter(function(c){return (c.name||'').toLowerCase().indexOf(q)!==-1;}).slice(0,10);
+  if(!matches.length){list.style.display='none';return;}
+  // Rank: exact prefix first, then substring
+  matches.sort(function(a,b){
+    var ap=a.name.toLowerCase().indexOf(q)===0?0:1,bp=b.name.toLowerCase().indexOf(q)===0?0:1;
+    return ap-bp;
+  });
+  list.innerHTML=matches.map(function(c){
+    return '<div onmousedown="document.getElementById(\'f_planCarrier\').value=\''+(c.name||'').replace(/'/g,"\\'")+'\';document.getElementById(\'carrierACList\').style.display=\'none\';markFormDirty();">'+(c.name||'')+'</div>';
+  }).join('');
+  list.style.display='block';
+}
+/* Add hover-only copy button to every text/email/tel/password input. Runs after
+   any dynamic content is inserted. Skips: no id, existing copyables, hidden inputs. */
+function wireCopyableFields(){
+  document.querySelectorAll('#viewForm input:not([type="checkbox"]):not([type="date"]):not([type="hidden"]):not([data-copyable])').forEach(function(inp){
+    if(!inp.id)return;
+    // Skip inputs that already sit inside a reveal-wrap (they have their own copy button)
+    if(inp.parentNode&&inp.parentNode.classList&&inp.parentNode.classList.contains('reveal-wrap'))return;
+    inp.setAttribute('data-copyable','1');
+    var field=inp.closest('.field');if(!field)return;
+    field.classList.add('field-copyable');
+    var btn=document.createElement('button');
+    btn.type='button';btn.className='copy-hover-btn';btn.title='Copy';
+    btn.innerHTML='<svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    btn.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();if(!inp.value)return;navigator.clipboard.writeText(inp.value);btn.classList.add('copied');btn.innerHTML='<svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';setTimeout(function(){btn.classList.remove('copied');btn.innerHTML='<svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';},1200);});
+    field.appendChild(btn);
+  });
+}
+/* Install a delegated input listener that auto-clamps all date fields */
+document.addEventListener('input',function(e){if(e.target&&e.target.type==='date')clampDate(e.target);});
 function updateMemberCount(){document.getElementById('memberCount').textContent=document.querySelectorAll('.member-row-data').length;}
 function populateCountySel(sel,counties,savedVal){
   sel.innerHTML='';

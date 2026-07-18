@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717p">
+<link rel="stylesheet" href="styles.css?v=20260717q">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -180,7 +180,7 @@
             <div class="form-section-title">Health Insurance Plan</div>
             <div class="fg" style="grid-template-columns:0.9fr 0.9fr 1.3fr 0.7fr 0.7fr 0.7fr;gap:8px;margin-bottom:8px;">
               <div class="field"><label>Plan Type</label><select id="f_planType"><option value="">Select</option><option>ACA/Marketplace</option><option>Medicare</option><option>Medicaid</option><option>Short Term</option><option>Ancillary</option></select></div>
-              <div class="field"><label>Carrier</label><select id="f_planCarrier"><option value="">Select</option></select></div>
+              <div class="field autocomplete-wrap"><label>Carrier</label><input id="f_planCarrier" autocomplete="off" placeholder="Start typing..." oninput="carrierAC(this)" onblur="setTimeout(function(){var l=document.getElementById('carrierACList');if(l)l.style.display='none';},200)"><div class="autocomplete-list" id="carrierACList"></div></div>
               <div class="field"><label>Plan Name</label><input id="f_planName"></div>
               <div class="field"><label>Network</label><select id="f_type"><option></option><option>PPO</option><option>HMO</option><option>EPO</option><option>POS</option><option>STM</option><option>MAPD</option><option>Med Supp</option><option>PDP</option></select></div>
               <div class="field"><label>Level</label><select id="f_level"><option></option><option>Bronze</option><option>Silver</option><option>Gold</option><option>Platinum</option><option>Catastrophic</option></select></div>
@@ -286,11 +286,11 @@
           <!-- 5. MAILING ADDRESS -->
           <div class="form-section">
             <div class="form-section-title">Mailing Address
-              <label style="font-weight:normal;font-size:10px;margin-left:10px;cursor:pointer;">
-                <input type="checkbox" id="f_sameAddress" onchange="toggleMailingAddress()"> Same as residential
+              <label style="font-weight:normal;font-size:11px;margin-left:10px;cursor:pointer;color:#555;text-transform:none;letter-spacing:0;">
+                <input type="checkbox" id="f_diffMailing" onchange="toggleMailingAddress()"> Different from residential
               </label>
             </div>
-            <div id="mailingAddressSection">
+            <div id="mailingAddressSection" style="display:none;">
               <div class="fg g4" style="margin-bottom:8px;">
                 <div class="field autocomplete-wrap" style="grid-column:span 2;"><label>Address</label><input id="f_billAddress" autocomplete="off" oninput="addrAC(this,'bill')" onblur="setTimeout(function(){var l=document.getElementById('billAddrList');if(l)l.style.display='none';},200)"><div class="addr-autocomplete-list" id="billAddrList"></div></div>
                 <div class="field"><label>Zip</label><input id="f_billZip" oninput="lookupZip(this,'bill')"></div>
@@ -322,7 +322,7 @@
             </div>
             <div class="fg g3" style="margin-bottom:8px;">
               <div class="field"><label>Routing Number</label>
-                <div class="reveal-wrap"><input id="f_routing" type="password" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_routing',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+                <div class="reveal-wrap"><input id="f_routing" type="password" placeholder="9-digit routing #" maxlength="9" oninput="if(this.value.replace(/\D/g,'').length===9)lookupBankFromRouting(this.value)" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_routing',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
               </div>
               <div class="field"><label>Account Number</label>
                 <div class="reveal-wrap"><input id="f_account" type="password" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_account',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
@@ -332,7 +332,7 @@
             <div class="fg g4">
               <div class="field"><label>Card Type</label><select id="f_cardType"><option></option><option>Visa</option><option>Mastercard</option><option>Amex</option><option>Discover</option></select></div>
               <div class="field"><label>Card Number</label>
-                <div class="reveal-wrap"><input id="f_cardNumber" type="password" placeholder="1234 5678 9012 3456" maxlength="19" oninput="formatCardNumber(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cardNumber',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+                <div class="reveal-wrap"><input id="f_cardNumber" type="password" placeholder="1234 5678 9012 3456" maxlength="19" oninput="formatCardNumber(this);autoDetectCardType(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cardNumber',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
               </div>
               <div class="field"><label>Exp (MM/YY)</label>
                 <div class="reveal-wrap"><input id="f_cardExp" type="password" placeholder="MM/YY" maxlength="5" oninput="formatCardExp(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cardExp',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
@@ -414,14 +414,12 @@
           <!-- 12. AGENT INFORMATION -->
           <div class="form-section">
             <div class="form-section-title">Agent Information</div>
-            <div class="fg g2">
+            <div class="fg" style="grid-template-columns:180px 180px 160px 160px;gap:10px;">
               <div class="field"><label>Agent</label><select id="f_agent"><option>Thomas Jaboro</option><option>Paul Jaboro Jr.</option></select></div>
               <div class="field"><label>Lead Source</label>
                 <select id="f_leadSource"><option></option><option>Insurance Quotes</option><option>Datalot</option><option>Smart Financial</option><option>Referral</option><option>Other</option></select>
               </div>
-            </div>
-            <div class="fg g3" style="margin-top:8px;">
-              <div class="field"><label>Lead Date</label><input type="date" id="f_leadDate"></div>
+              <div class="field"><label>Lead Date</label><input type="date" id="f_leadDate" oninput="clampDate(this)"></div>
               <div class="field"><label>Renewed</label><select id="f_renewed"><option></option><option>2026 Renewed</option><option>Not Renewed</option></select></div>
             </div>
           </div>
@@ -853,7 +851,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717p"></script>
+<script src="app.js?v=20260717q"></script>
 
 </body>
 </html>
