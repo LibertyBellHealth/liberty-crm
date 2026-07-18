@@ -1143,7 +1143,7 @@ function addMedRow(data){
   div.innerHTML='<div class="field autocomplete-wrap"><label>Medication Name</label><input data-field="name" placeholder="Start typing..." value="'+(data&&data.name||'')+'" oninput="medAC(this)" onblur="medBlur(this)" autocomplete="off"><div class="autocomplete-list"></div></div>'+
     '<div class="field"><label>Mg</label><input data-field="mg" value="'+(data&&data.mg||'')+'"></div>'+
     '<div class="field"><label>Frequency</label><input data-field="frequency" value="'+(data&&data.frequency||'')+'"></div>'+
-    '<button class="btn" style="padding:3px 8px;align-self:flex-end;font-size:10px;white-space:nowrap;background:#e8f4ec;border-color:#28a745;color:#28a745;" onclick="saveMedFromRow(this)" title="Save this medication to your list">+ Save Med</button>'+
+    '<button type="button" class="icon-btn" onclick="saveMedFromRow(this)" title="Save this medication to your library"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>'+
     '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this medication?\')" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
   document.getElementById('medsContainer').appendChild(div);
 }
@@ -1152,10 +1152,14 @@ function saveMedFromRow(btn){
   var nameEl=row.querySelector('[data-field="name"]');
   var name=(nameEl&&nameEl.value||'').trim();
   if(!name){toast('Please enter a medication name first.','error');return;}
-  if(MED_LIST.indexOf(name)!==-1||_customMeds.indexOf(name)!==-1){toast('"'+name+'" is already in your medication list!','info');return;}
+  if(MED_LIST.indexOf(name)!==-1||_customMeds.indexOf(name)!==-1){toast('"'+name+'" is already in your library','info');return;}
   saveCustomMed(name);
-  btn.textContent='✓ Saved!';btn.style.background='#d1fae5';btn.disabled=true;
-  setTimeout(function(){btn.textContent='+ Save Med';btn.style.background='#e8f4ec';btn.disabled=false;},2000);
+  toast('"'+name+'" saved to your library','success');
+  var orig=btn.innerHTML;
+  btn.classList.add('copied');
+  // Filled bookmark = saved state
+  btn.innerHTML='<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+  setTimeout(function(){btn.classList.remove('copied');btn.innerHTML=orig;},1600);
 }
 function medAC(el){
   var v=el.value.toLowerCase();var list=el.parentNode.querySelector('.autocomplete-list');
