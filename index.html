@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717j">
+<link rel="stylesheet" href="styles.css?v=20260717k">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -377,7 +377,26 @@
           <div class="form-section">
             <div class="form-section-title">Medications</div>
             <div id="medsContainer"></div>
-            <button class="btn add-row-btn" onclick="addMedRow()">+ Add Medication</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+              <button type="button" class="btn add-row-btn" onclick="addMedRow()">+ Add Medication</button>
+              <button type="button" class="btn add-row-btn" onclick="openMedsPasteModal()">Paste List</button>
+              <button type="button" class="btn add-row-btn" onclick="copyAllMeds(this)">Copy All</button>
+            </div>
+            <div id="medsPasteModal" class="modal-backdrop" style="display:none;">
+              <div class="modal-card">
+                <div class="modal-title">Paste Medication List</div>
+                <div class="modal-hint">One medication per line. Examples:<br>
+                  <code>Metformin 500mg twice daily</code><br>
+                  <code>Lisinopril 10mg BID</code><br>
+                  <code>Atorvastatin 20 mg at bedtime</code>
+                </div>
+                <textarea id="medsPasteInput" rows="10" placeholder="Paste medications here..."></textarea>
+                <div class="modal-actions">
+                  <button type="button" class="btn" onclick="closeMedsPasteModal()">Cancel</button>
+                  <button type="button" class="btn btn-green" onclick="importPastedMeds()">Import</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 12. AGENT INFORMATION -->
@@ -825,7 +844,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717j"></script>
+<script src="app.js?v=20260717k"></script>
 
 </body>
 </html>

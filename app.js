@@ -673,6 +673,53 @@ function removeOtherIncomeRow(btn){
   updateOtherIncomeAddBtn();
   calcTotalIncome();
 }
+function openMedsPasteModal(){var m=document.getElementById('medsPasteModal');if(m){document.getElementById('medsPasteInput').value='';m.style.display='flex';setTimeout(function(){document.getElementById('medsPasteInput').focus();},50);}}
+function closeMedsPasteModal(){var m=document.getElementById('medsPasteModal');if(m)m.style.display='none';}
+/* Parse one line into {name, mg, frequency}. Handles common formats:
+     Metformin 500mg BID
+     Lisinopril 10 mg once daily
+     Atorvastatin - 20mg - at bedtime
+     Just a plain name (no dose) → name only */
+function parseMedLine(line){
+  var s=line.replace(/[–—]/g,'-').replace(/\s+/g,' ').trim();
+  if(!s)return null;
+  // Extract dose: number (optionally decimal) followed by mg / mcg / g / units
+  var doseMatch=s.match(/(\d+(?:\.\d+)?)\s*(mg|mcg|g|units?|iu|ml)\b/i);
+  if(!doseMatch)return{name:s.replace(/^-+|-+$/g,'').trim(),mg:'',frequency:''};
+  var mg=doseMatch[1]+doseMatch[2].toLowerCase();
+  var before=s.slice(0,doseMatch.index).trim().replace(/[-,]+$/,'').trim();
+  var after=s.slice(doseMatch.index+doseMatch[0].length).trim().replace(/^[-,]+/,'').trim();
+  return{name:before,mg:mg,frequency:after};
+}
+function importPastedMeds(){
+  var txt=document.getElementById('medsPasteInput').value||'';
+  var lines=txt.split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
+  if(!lines.length){closeMedsPasteModal();return;}
+  // Wipe out any empty starter row before importing
+  var c=document.getElementById('medsContainer');
+  if(c){Array.from(c.querySelectorAll('.med-row-data')).forEach(function(row){
+    var vals=Array.from(row.querySelectorAll('[data-field]')).map(function(el){return el.value.trim();}).join('');
+    if(!vals)row.remove();
+  });}
+  var added=0;
+  lines.forEach(function(line){var m=parseMedLine(line);if(m&&(m.name||m.mg)){addMedRow(m);added++;}});
+  closeMedsPasteModal();
+  toast('Imported '+added+' medication'+(added===1?'':'s'),'success');
+}
+function copyAllMeds(btn){
+  var rows=document.querySelectorAll('#medsContainer .med-row-data');
+  var lines=[];
+  rows.forEach(function(row){
+    var name=(row.querySelector('[data-field="name"]')||{}).value||'';
+    var mg=(row.querySelector('[data-field="mg"]')||{}).value||'';
+    var freq=(row.querySelector('[data-field="frequency"]')||{}).value||'';
+    var parts=[name,mg,freq].filter(function(p){return p&&p.trim();});
+    if(parts.length)lines.push(parts.join(' '));
+  });
+  if(!lines.length){toast('No medications to copy','info');return;}
+  navigator.clipboard.writeText(lines.join('\n'));
+  if(btn){var o=btn.textContent;btn.textContent='Copied '+lines.length+'!';setTimeout(function(){btn.textContent=o;},1400);}
+}
 function updateOtherIncomeAddBtn(){
   var c=document.getElementById('otherIncomeContainer');var b=document.getElementById('addOtherIncomeBtn');
   if(!c||!b)return;

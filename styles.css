@@ -82,6 +82,16 @@
 .sb-collapse:hover{color:#fff;background:rgba(255,255,255,0.16);}
 .sidebar.collapsed .sb-collapse{top:10px;right:10px;left:auto;}
 
+/* Generic modal (used by Paste Medications, etc.) */
+.modal-backdrop{position:fixed;inset:0;background:rgba(26,43,69,0.4);display:flex;align-items:center;justify-content:center;z-index:2000;padding:20px;}
+.modal-card{background:var(--surface);border-radius:8px;box-shadow:0 12px 40px rgba(0,0,0,0.2);padding:20px 22px;max-width:520px;width:100%;max-height:80vh;overflow:auto;}
+.modal-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:8px;}
+.modal-hint{font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.6;}
+.modal-hint code{background:var(--surface-alt);border:1px solid var(--border);padding:1px 5px;border-radius:3px;font-family:ui-monospace,Menlo,monospace;font-size:10px;color:var(--text);}
+.modal-card textarea{width:100%;padding:8px 10px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:var(--text);outline:none;resize:vertical;min-height:180px;}
+.modal-card textarea:focus{border-color:var(--accent);}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
+
 /* Kebab (⋮) menu — collapses utility actions on entity headers */
 .kebab-wrap{position:relative;display:inline-block;}
 .kebab-btn{padding:5px 10px;font-size:18px;line-height:1;color:var(--text-muted);}
