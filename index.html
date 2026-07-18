@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717k">
+<link rel="stylesheet" href="styles.css?v=20260717l">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -370,7 +370,26 @@
           <div class="form-section">
             <div class="form-section-title">Doctors</div>
             <div id="doctorsContainer"></div>
-            <button class="btn add-row-btn" onclick="addDoctorRow()">+ Add Doctor</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+              <button type="button" class="btn add-row-btn" onclick="addDoctorRow()">+ Add Doctor</button>
+              <button type="button" class="btn add-row-btn" onclick="openDocsPasteModal()">Paste List</button>
+              <button type="button" class="btn add-row-btn" onclick="copyAllDoctors(this)">Copy All</button>
+            </div>
+            <div id="docsPasteModal" class="modal-backdrop" style="display:none;">
+              <div class="modal-card">
+                <div class="modal-title">Paste Doctor List</div>
+                <div class="modal-hint">One doctor per line. Separate name from specialty/phone with a dash, comma, or tab. Examples:<br>
+                  <code>Dr. Smith - Cardiology</code><br>
+                  <code>Dr. Jones, Primary Care 555-1234</code><br>
+                  <code>Williams | Endocrinology</code>
+                </div>
+                <textarea id="docsPasteInput" rows="10" placeholder="Paste doctors here..."></textarea>
+                <div class="modal-actions">
+                  <button type="button" class="btn" onclick="closeDocsPasteModal()">Cancel</button>
+                  <button type="button" class="btn btn-green" onclick="importPastedDoctors()">Import</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 11. MEDICATIONS -->
@@ -844,7 +863,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717k"></script>
+<script src="app.js?v=20260717l"></script>
 
 </body>
 </html>

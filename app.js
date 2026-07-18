@@ -706,6 +706,43 @@ function importPastedMeds(){
   closeMedsPasteModal();
   toast('Imported '+added+' medication'+(added===1?'':'s'),'success');
 }
+function openDocsPasteModal(){var m=document.getElementById('docsPasteModal');if(m){document.getElementById('docsPasteInput').value='';m.style.display='flex';setTimeout(function(){document.getElementById('docsPasteInput').focus();},50);}}
+function closeDocsPasteModal(){var m=document.getElementById('docsPasteModal');if(m)m.style.display='none';}
+/* Parse one line into {name, specialty}. First token before a dash/comma/pipe/tab is name; rest joined is specialty. */
+function parseDoctorLine(line){
+  var s=line.replace(/[–—]/g,'-').replace(/\s+/g,' ').trim();
+  if(!s)return null;
+  var m=s.match(/^(.+?)\s*(?:[-,|\t])\s*(.+)$/);
+  if(!m)return{name:s,specialty:''};
+  return{name:m[1].trim(),specialty:m[2].trim()};
+}
+function importPastedDoctors(){
+  var txt=document.getElementById('docsPasteInput').value||'';
+  var lines=txt.split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
+  if(!lines.length){closeDocsPasteModal();return;}
+  var c=document.getElementById('doctorsContainer');
+  if(c){Array.from(c.querySelectorAll('.doctor-row-data')).forEach(function(row){
+    var vals=Array.from(row.querySelectorAll('[data-field]')).map(function(el){return el.value.trim();}).join('');
+    if(!vals)row.remove();
+  });}
+  var added=0;
+  lines.forEach(function(line){var d=parseDoctorLine(line);if(d&&d.name){addDoctorRow(d);added++;}});
+  closeDocsPasteModal();
+  toast('Imported '+added+' doctor'+(added===1?'':'s'),'success');
+}
+function copyAllDoctors(btn){
+  var rows=document.querySelectorAll('#doctorsContainer .doctor-row-data');
+  var lines=[];
+  rows.forEach(function(row){
+    var name=(row.querySelector('[data-field="name"]')||{}).value||'';
+    var spec=(row.querySelector('[data-field="specialty"]')||{}).value||'';
+    var parts=[name,spec].filter(function(p){return p&&p.trim();});
+    if(parts.length)lines.push(parts.join(' - '));
+  });
+  if(!lines.length){toast('No doctors to copy','info');return;}
+  navigator.clipboard.writeText(lines.join('\n'));
+  if(btn){var o=btn.textContent;btn.textContent='Copied '+lines.length+'!';setTimeout(function(){btn.textContent=o;},1400);}
+}
 function copyAllMeds(btn){
   var rows=document.querySelectorAll('#medsContainer .med-row-data');
   var lines=[];
