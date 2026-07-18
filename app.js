@@ -1,0 +1,1555 @@
+// ── CONFIGURATION ─────────────────────────────────────────────
+function toast(msg, type, duration){
+  type = type || 'success'; duration = duration || 3000;
+  var c = document.getElementById('toastContainer');
+  var t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  c.appendChild(t);
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){ t.classList.add('show'); }); });
+  setTimeout(function(){ t.classList.remove('show'); setTimeout(function(){ if(t.parentNode)t.parentNode.removeChild(t); }, 300); }, duration);
+}
+
+var API_BASE    = 'https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net/api';
+var API_APP_ID  = '0c1627c1-c186-4e46-b919-e4a12f2f3952'; // Easy Auth app registration
+var _apiToken   = null; // cached Bearer token, refreshed automatically
+var SP_CLIENT_ID = '63828fd5-e676-4dd7-bfaa-0055fdb9b3c7';
+var SP_TENANT_ID = '12be0d3c-3e63-429f-bf46-1a2f746aa25f';
+var REDIRECT_URI  = 'https://polite-pebble-039f4a010.7.azurestaticapps.net';
+
+var ALLOWED_USERS = [
+  'tommy@mybellcare.com',
+  'paul@mybellcare.com',
+  'rob@mybellcare.com'
+];
+
+function aiTrack(name, props) {
+  try {
+    var ai = window.appInsights;
+    if (ai && ai.trackEvent) {
+      var acc = msalInstance && msalInstance.getAllAccounts && msalInstance.getAllAccounts();
+      var user = (acc && acc.length) ? acc[0].username : 'unknown';
+      ai.trackEvent({ name: name }, Object.assign({ user: user, site: 'crm' }, props || {}));
+    }
+  } catch (e) { /* silent */ }
+}
+
+var _sessionTimer = null;
+function resetSessionTimer() {
+  clearTimeout(_sessionTimer);
+  _sessionTimer = setTimeout(function () {
+    aiTrack('SessionTimeout', { reason: '15min-inactivity' });
+    clearCRMStorage();
+    signOut();
+  }, 15 * 60 * 1000);
+}
+['click','keydown','mousemove','touchstart'].forEach(function(ev){
+  document.addEventListener(ev, resetSessionTimer, true);
+});
+
+function clearCRMStorage() {
+  ['crm_preview','crm_carriers','crm_settings','crm_custom_meds',
+   'crm_agents','crm_lead_sources','crm_renewals','crm_plan_types',
+   'crm_project_codes','crm_display_name','crm_todos','crm_recent'].forEach(function(k){
+    localStorage.removeItem(k);
+  });
+}
+
+var msalInstance=null,spToken=null,clients=[],editingId=null,csvHeaders=[],csvData=[],currentReportData=[],carriers=[],customReportData=[];
+
+// ── MSAL authentication ────────────────────────────────────────
+function initMSAL(){
+  var config={auth:{clientId:SP_CLIENT_ID,authority:'https://login.microsoftonline.com/'+SP_TENANT_ID,redirectUri:REDIRECT_URI},cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true}};
+  msalInstance=new msal.PublicClientApplication(config);
+  msalInstance.initialize().then(function(){
+    msalInstance.handleRedirectPromise().then(function(resp){
+      if(resp&&resp.account){onSignedIn(resp.account);return;}
+      var accounts=msalInstance.getAllAccounts();
+      if(accounts.length>0){onSignedIn(accounts[0]);}
+      else{showAuthScreen();}
+    }).catch(function(){showAuthScreen();});
+  });
+}
+function showAuthScreen(){document.getElementById('authScreen').style.display='flex';document.getElementById('mainApp').style.display='none';}
+function onSignedIn(account){
+  var email=(account&&(account.username||account.name||'')).toLowerCase();
+  if(!ALLOWED_USERS.map(function(u){return u.toLowerCase();}).includes(email)){
+    alert('Access denied. Your account ('+email+') is not authorized for this application.');
+    msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});
+    return;
+  }
+  document.getElementById('authScreen').style.display='none';
+  document.getElementById('mainApp').style.display='flex';
+  document.getElementById('userEmail').textContent=email;
+  aiTrack('UserSignIn',{email:email});
+  resetSessionTimer();
+  refreshApiToken().then(function(){ loadClients(); });
+}
+var API_SCOPE='api://'+API_APP_ID+'/user_impersonation';
+// Only Graph scopes in loginRedirect — API_SCOPE from different resource causes 400 on token endpoint.
+// refreshApiToken() acquires API token silently after login (admin consent already granted).
+function signIn(){msalInstance.loginRedirect({scopes:['openid','profile'],redirectUri:REDIRECT_URI});}
+function signOut(){
+  aiTrack('UserSignOut',{});
+  clearCRMStorage();
+  clearTimeout(_sessionTimer);
+  _apiToken=null;
+  msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});
+}
+
+// ── API HELPERS ────────────────────────────────────────────────
+function apiHeaders(){var h={'Content-Type':'application/json'};if(_apiToken)h['Authorization']='Bearer '+_apiToken;return h;}
+function authUploadHeaders(){return _apiToken?{'Authorization':'Bearer '+_apiToken}:{};}
+async function refreshApiToken(){
+  if(!msalInstance)return;
+  var accounts=msalInstance.getAllAccounts();if(!accounts.length)return;
+  try{
+    var res=await msalInstance.acquireTokenSilent({scopes:[API_SCOPE],account:accounts[0]});
+    _apiToken=res.accessToken;
+    var ttl=res.expiresOn?(res.expiresOn.getTime()-Date.now()-600000):3000000;
+    setTimeout(refreshApiToken,Math.max(ttl,60000));
+  }catch(e){
+    console.warn('API token silent refresh failed, opening consent popup:',e);
+    try{
+      var r2=await msalInstance.acquireTokenPopup({scopes:[API_SCOPE]});
+      _apiToken=r2.accessToken;
+      var ttl2=r2.expiresOn?(r2.expiresOn.getTime()-Date.now()-600000):3000000;
+      setTimeout(refreshApiToken,Math.max(ttl2,60000));
+    }catch(e2){console.warn('API token popup also failed:',e2);}
+  }
+}
+
+// ── DATA MAPPING (form fields ↔ DB columns) ────────────────────
+function clientToDbRow(d){
+  return {
+    first_name:d.f_firstName, middle_initial:d.f_mi, last_name:d.f_lastName,
+    dob:d.f_dob, age:parseInt(d.f_age)||null, gender:d.f_gender,
+    ssn:d.f_ssn, relation:d.f_relation, marital_status:d.f_marital,
+    tobacco:d.f_tobacco, height:d.f_height, weight:d.f_weight, insured:d.f_insured,
+    phone:d.f_phone, alt_phone:d.f_altPhone, email:d.f_email, email2:d.f_email2,
+    res_address:d.f_resAddress, res_zip:d.f_resZip, res_city:d.f_resCity,
+    res_state:d.f_resSt, res_county:d.f_resCounty,
+    same_address:d.f_sameAddress?1:0,
+    bill_address:d.f_billAddress, bill_zip:d.f_billZip, bill_city:d.f_billCity,
+    bill_state:d.f_billSt, bill_county:d.f_billCounty,
+    plan_name:d.f_planName, plan_type:d.f_planType, plan_carrier:d.f_planCarrier, plan_network:d.f_type,
+    plan_level:d.f_level, deductible:d.f_deductible, comoop:d.f_comoop,
+    total_premium:d.f_totalPremium, subsidy:d.f_subsidy, premium:d.f_premium, app_fee:d.f_appFee,
+    has_medicare:d.f_hasMedicare?1:0,
+    medicare_num:d.f_medicareNum, medicare_a_eff:d.f_medicareA, medicare_b_eff:d.f_medicareB,
+    has_medicaid:d.f_hasMedicaid?1:0, medicaid_num:d.f_medicaid, medicaid_eff:d.f_medicaidEff,
+    waive_dental:d.f_waiveDental?1:0, total_monthly:d.f_totalMonthly,
+    health_pay_date:d.f_healthPayDate, health_effective:d.f_healthEffective,
+    ancil_pay_date:d.f_ancilPayDate, ancil_effective:d.f_ancilEffective,
+    dental_pay_date:d.f_dentalPayDate, dental_effective:d.f_dentalEffective,
+    total_first_month:d.f_totalFirstMonth,
+    primary_employer:d.f_primaryEmployer, primary_income:d.f_primaryIncome,
+    spouse_employer:d.f_spouseEmployer, spouse_income:d.f_spouseIncome,
+    other_income1:d.f_otherIncome1, other_income_amt1:d.f_otherIncomeAmt1,
+    other_income2:d.f_otherIncome2, other_income_amt2:d.f_otherIncomeAmt2,
+    other_income3:d.f_otherIncome3, other_income_amt3:d.f_otherIncomeAmt3,
+    total_income:d.f_totalIncome,
+    emergency_name:d.f_emergencyName, emergency_relation:d.f_emergencyRelation,
+    emergency_phone:d.f_emergencyPhone,
+    bank_name:d.f_bankName, account_type:d.f_accountType,
+    routing:d.f_routing, account_num:d.f_account, account_name:d.f_accountName,
+    card_type:d.f_cardType, card_number:d.f_cardNumber, card_exp:d.f_cardExp, cvv:d.f_cvv,
+    agent:d.f_agent, submitted_by:d.f_submittedBy, application_date:d.f_date,
+    lead_source:d.f_leadSource, lead_date:d.f_leadDate, renewed:d.f_renewed,
+    mothers_maiden:d.f_mothersMaiden, notes:d.f_notes,
+    members_json:JSON.stringify(d.members||[]),
+    doctors_json:JSON.stringify(d.doctors||[]),
+    medications_json:JSON.stringify(d.meds||[]),
+    ancil_plans_json:JSON.stringify(d.ancilPlans||[]),
+    homecare_client_id:parseInt(d.f_homecareClientId)||null,
+  };
+}
+function dbRowToClient(row){
+  var c={
+    _id:row.id,
+    f_firstName:row.first_name, f_mi:row.middle_initial, f_lastName:row.last_name,
+    f_dob:row.dob, f_age:row.age, f_gender:row.gender, f_ssn:row.ssn,
+    f_relation:row.relation, f_marital:row.marital_status,
+    f_tobacco:row.tobacco, f_height:row.height, f_weight:row.weight, f_insured:row.insured,
+    f_phone:row.phone, f_altPhone:row.alt_phone, f_email:row.email, f_email2:row.email2,
+    f_resAddress:row.res_address, f_resZip:row.res_zip, f_resCity:row.res_city,
+    f_resSt:row.res_state, f_resCounty:row.res_county,
+    f_sameAddress:!!row.same_address,
+    f_billAddress:row.bill_address, f_billZip:row.bill_zip, f_billCity:row.bill_city,
+    f_billSt:row.bill_state, f_billCounty:row.bill_county,
+    f_planName:row.plan_name, f_planType:row.plan_type, f_planCarrier:row.plan_carrier, f_type:row.plan_network,
+    f_level:row.plan_level, f_deductible:row.deductible, f_comoop:row.comoop,
+    f_totalPremium:row.total_premium, f_subsidy:row.subsidy, f_premium:row.premium,
+    f_appFee:row.app_fee,
+    f_hasMedicare:!!row.has_medicare, f_medicareNum:row.medicare_num,
+    f_medicareA:row.medicare_a_eff, f_medicareB:row.medicare_b_eff,
+    f_hasMedicaid:!!row.has_medicaid, f_medicaid:row.medicaid_num, f_medicaidEff:row.medicaid_eff,
+    f_waiveDental:!!row.waive_dental, f_totalMonthly:row.total_monthly,
+    f_healthPayDate:row.health_pay_date, f_healthEffective:row.health_effective,
+    f_ancilPayDate:row.ancil_pay_date, f_ancilEffective:row.ancil_effective,
+    f_dentalPayDate:row.dental_pay_date, f_dentalEffective:row.dental_effective,
+    f_totalFirstMonth:row.total_first_month,
+    f_primaryEmployer:row.primary_employer, f_primaryIncome:row.primary_income,
+    f_spouseEmployer:row.spouse_employer, f_spouseIncome:row.spouse_income,
+    f_otherIncome1:row.other_income1, f_otherIncomeAmt1:row.other_income_amt1,
+    f_otherIncome2:row.other_income2, f_otherIncomeAmt2:row.other_income_amt2,
+    f_otherIncome3:row.other_income3, f_otherIncomeAmt3:row.other_income_amt3,
+    f_totalIncome:row.total_income,
+    f_emergencyName:row.emergency_name, f_emergencyRelation:row.emergency_relation,
+    f_emergencyPhone:row.emergency_phone,
+    f_bankName:row.bank_name, f_accountType:row.account_type,
+    f_routing:row.routing, f_account:row.account_num, f_accountName:row.account_name,
+    f_cardType:row.card_type, f_cardNumber:row.card_number, f_cardExp:row.card_exp,
+    f_cvv:row.cvv,
+    f_agent:row.agent, f_submittedBy:row.submitted_by, f_date:row.application_date,
+    f_leadSource:row.lead_source, f_leadDate:row.lead_date, f_renewed:row.renewed,
+    f_mothersMaiden:row.mothers_maiden, f_notes:row.notes,
+    f_homecareClientId:row.homecare_client_id||'',
+  };
+  try{c.members=JSON.parse(row.members_json||'[]');}catch(e){c.members=[];}
+  try{c.doctors=JSON.parse(row.doctors_json||'[]');}catch(e){c.doctors=[];}
+  try{c.meds=JSON.parse(row.medications_json||'[]');}catch(e){c.meds=[];}
+  try{c.ancilPlans=JSON.parse(row.ancil_plans_json||'[]');}catch(e){c.ancilPlans=[];}
+  return c;
+}
+
+function loadClients(){
+  fetch(API_BASE+'/health-clients',{headers:apiHeaders()})
+  .then(function(r){return r.json();})
+  .then(function(data){
+    clients=data.map(function(row){return dbRowToClient(row);});
+    renderClientTable(clients);renderReportCards();
+  }).catch(function(e){console.error('Load error:',e);});
+}
+function saveClientAPI(data,id){
+  var body=clientToDbRow(data);
+  if(id)body.id=id;
+  return fetch(API_BASE+'/health-clients',{method:'POST',headers:apiHeaders(),body:JSON.stringify(body)})
+    .then(function(r){return r.json();});
+}
+function deleteClientAPI(id){
+  return fetch(API_BASE+'/health-clients/'+id,{method:'DELETE',headers:apiHeaders()});
+}
+
+var VIEWS=['viewClients','viewNew','viewForm','viewImport','viewReports','viewCustomReports','viewCarriers','viewAdvSearch','viewTodo','viewSettings','viewRecent'];
+function showView(v){
+  VIEWS.forEach(function(id){document.getElementById(id).style.display='none';});
+  document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active');});
+  var map={clients:'viewClients',new:'viewNew',form_edit:'viewForm',import:'viewImport',reports:'viewReports',customReports:'viewCustomReports',carriers:'viewCarriers',advSearch:'viewAdvSearch',todo:'viewTodo',settings:'viewSettings',recent:'viewRecent'};
+  var navMap={clients:'navClients',new:'navNew',reports:'navReports',customReports:'navCustomReports',carriers:'navCarriers',advSearch:'navAdvSearch',todo:'navTodo',settings:'navSettings',recent:'navRecent'};
+  var vid=map[v];if(vid)document.getElementById(vid).style.display='block';
+  var nid=navMap[v];if(nid)document.getElementById(nid).classList.add('active');
+  if(vid)document.querySelector('.main').scrollTop=0;
+  if(v==='carriers')renderCarriers();
+  if(v==='todo')renderTodos();
+  if(v==='settings'){renderSettings();populateDefaultAgentSelect();}
+  if(v==='advSearch')populateAdvSearchCarriers();
+  if(v==='recent')renderRecentRecords();
+}
+
+function startNewApp(type){
+  if(type==='life'){toast('Life App coming soon!','info');return;}
+  try{clearForm();}catch(e){console.log('clearForm error:',e);}
+  editingId=null;
+  try{addDoctorRow();}catch(e){}
+  try{addMedRow();}catch(e){}
+  try{loadCarriersToSelect();}catch(e){}
+  document.getElementById('formTitle').textContent='New Health Application';
+  document.getElementById('deleteBtn').style.display='none';
+  document.getElementById('deleteBtn2').style.display='none';
+  document.getElementById('f_date').value=fmtToday();
+  showView('form_edit');
+}
+function fmtToday(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+
+function renderClientTable(data){
+  var tbody=document.getElementById('clientTableBody');tbody.innerHTML='';
+  document.getElementById('clientCount').textContent='('+data.length+')';
+  if(!data.length){document.getElementById('emptyState').style.display='block';return;}
+  document.getElementById('emptyState').style.display='none';
+  data.forEach(function(c){
+    var tr=document.createElement('tr');
+    var bc='badge-blue';
+    if(c.f_planType==='Medicare')bc='badge-green';
+    else if(c.f_planType==='Medicaid')bc='badge-orange';
+    else if(c.f_planType==='Short Term')bc='badge-red';
+    var badge=c.f_planType?'<span class="badge '+bc+'">'+c.f_planType+'</span>':'';
+    var phone=c.f_phone||'';var email=c.f_email||'';
+    tr.innerHTML='<td><input type="checkbox" class="row-cb" data-id="'+c._id+'" onchange="updateBulkBtn()"></td>'+
+      '<td><span class="client-name-link" onclick="editClient(\''+c._id+'\')">'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</span></td>'+
+      '<td>'+(c.f_dob||'')+'</td>'+
+      '<td>'+phone+(phone?'<a href="tel:'+phone+'" class="copy-btn" title="Call" style="text-decoration:none;">&#x260E;</a><button class="copy-btn" onclick="copyText(\''+phone.replace(/'/g,"\\'")+'\')" title="Copy">&#x1F4CB;</button>':'')+'</td>'+
+      '<td>'+email+(email?'<a href="mailto:'+email+'" class="copy-btn" title="Email" style="text-decoration:none;">&#x2709;</a><button class="copy-btn" onclick="copyText(\''+email.replace(/'/g,"\\'")+'\')" title="Copy">&#x1F4CB;</button>':'')+'</td>'+
+      '<td>'+badge+'</td>'+
+      '<td>'+(c.f_planName||'')+'</td>'+
+      '<td>'+(c.f_premium?'$'+c.f_premium:'')+'</td>'+
+      '<td>'+(c.f_agent||'')+'</td>'+
+      '<td>'+(c.f_renewed||'')+'</td>'+
+      '<td>'+(c.homecare_client_id||c.f_homecareClientId?'<a class="homecare-link" href="https://nice-moss-053e8c60f.7.azurestaticapps.net" target="_blank">View ↗</a>':'')+'</td>';
+    tbody.appendChild(tr);
+  });
+}
+function filterClients(){
+  var q=document.getElementById('searchInput').value.toLowerCase();
+  var ssn4=document.getElementById('searchSSN4').value;
+  var agent=document.getElementById('filterAgent').value;
+  var plan=document.getElementById('filterPlan').value;
+  var special=document.getElementById('filterSpecial').value;
+  var renewed=document.getElementById('filterRenewed').value;
+  var yr=new Date().getFullYear();
+  var filtered=clients.filter(function(c){
+    if(q){var nm=((c.f_firstName||'')+' '+(c.f_lastName||'')).toLowerCase();var ph=(c.f_phone||'').toLowerCase();var em=(c.f_email||'').toLowerCase();if(!nm.includes(q)&&!ph.includes(q)&&!em.includes(q))return false;}
+    if(ssn4&&c.f_ssn){var l4=(c.f_ssn||'').replace(/\D/g,'').slice(-4);if(l4!==ssn4)return false;}
+    if(agent&&c.f_agent!==agent)return false;
+    if(plan&&c.f_planType!==plan)return false;
+    if(renewed&&c.f_renewed!==renewed)return false;
+    if(special&&c.f_dob){
+      var by=c.f_dob.split('/')[2]||c.f_dob.split('-')[0];var age=yr-parseInt(by);
+      if(special==='turning65'&&age!==64&&age!==65)return false;
+      if(special==='turning64'&&age!==63&&age!==64)return false;
+      if(special==='turning26'&&age!==25&&age!==26)return false;
+    } else if(special){return false;}
+    return true;
+  });
+  renderClientTable(filtered);
+}
+function clearFilters(){
+  document.getElementById('searchInput').value='';document.getElementById('searchSSN4').value='';
+  ['filterAgent','filterPlan','filterSpecial','filterRenewed','filterLeadSource'].forEach(function(id){document.getElementById(id).value='';});
+  renderClientTable(clients);
+}
+
+var FIELDS=['firstName','mi','lastName','relation','marital','gender','tobacco','height','weight','insured','ssn','dob','age',
+  'hasMedicare','medicareNum','medicareA','medicareB','hasMedicaid','medicaid','medicaidEff','mothersMaiden','homecareClientId',
+  'planName','planType','planCarrier','deductible','comoop','type','level','totalPremium','subsidy','premium','appFee',
+  'waiveDental','totalMonthly',
+  'resAddress','resZip','resCity','resSt','resCounty',
+  'billAddress','billZip','billCity','billSt','billCounty',
+  'phone','altPhone','email','email2',
+  'emergencyName','emergencyRelation','emergencyPhone',
+  'bankName','accountType','routing','account','accountName','cardType','cardNumber','cardExp','cvv',
+  'healthPayDate','healthEffective','ancilPayDate','ancilEffective','dentalPayDate','dentalEffective','totalFirstMonth',
+  'primaryEmployer','primaryIncome','spouseEmployer','spouseIncome',
+  'otherIncome1','otherIncomeAmt1','otherIncome2','otherIncomeAmt2','otherIncome3','otherIncomeAmt3','totalIncome',
+  'agent','submittedBy','date','leadSource','leadDate','renewed','notes'];
+
+function clearForm(){
+  FIELDS.forEach(function(f){
+    var el=document.getElementById('f_'+f);if(!el)return;
+    if(el.type==='checkbox')el.checked=false;else el.value='';
+  });
+  ['membersContainer','doctorsContainer','medsContainer','ancilContainer'].forEach(function(id){
+    var el=document.getElementById(id);if(el)el.innerHTML='';
+  });
+  var ag=document.getElementById('f_agent');if(ag)ag.value=localStorage.getItem('crm_default_agent')||'Thomas Jaboro';
+  var sa=document.getElementById('f_sameAddress');if(sa)sa.checked=false;
+  var ms=document.getElementById('mailingAddressSection');if(ms)ms.style.display='block';
+  var mf=document.getElementById('medicareFields');if(mf)mf.style.display='none';
+  var mcd=document.getElementById('medicaidFields');if(mcd)mcd.style.display='none';
+  var wd=document.getElementById('waiveDentalField');if(wd)wd.style.display='none';
+  var mc=document.getElementById('memberCount');if(mc)mc.textContent='0';
+  var td=document.getElementById('totalMonthlyDisplay');if(td)td.textContent='$0.00';
+  var ts=document.getElementById('f_totalMonthlyShow');if(ts)ts.value='';
+  var rc=document.getElementById('f_resCounty');if(rc)rc.innerHTML='<option value=""></option>';
+  var bc=document.getElementById('f_billCounty');if(bc)bc.innerHTML='<option value=""></option>';
+}
+function getFormData(){
+  var data={};
+  FIELDS.forEach(function(f){var el=document.getElementById('f_'+f);if(!el)return;if(el.type==='checkbox')data['f_'+f]=el.checked;else data['f_'+f]=el.value;});
+  data.members=[];
+  document.querySelectorAll('.member-row-data').forEach(function(row){
+    var m={};var hasData=false;
+    row.querySelectorAll('[data-field]').forEach(function(el){m[el.dataset.field]=el.value;if(el.value)hasData=true;});
+    if(hasData)data.members.push(m);
+  });
+  data.doctors=[];document.querySelectorAll('.doctor-row-data').forEach(function(row){var d={};row.querySelectorAll('[data-field]').forEach(function(el){d[el.dataset.field]=el.value;});data.doctors.push(d);});
+  data.meds=[];document.querySelectorAll('.med-row-data').forEach(function(row){var m={};row.querySelectorAll('[data-field]').forEach(function(el){m[el.dataset.field]=el.value;});data.meds.push(m);});
+  data.ancilPlans=[];document.querySelectorAll('.ancil-row-data').forEach(function(row){var a={};row.querySelectorAll('[data-field]').forEach(function(el){a[el.dataset.field]=el.value;});data.ancilPlans.push(a);});
+  return data;
+}
+function setFormData(data){
+  FIELDS.forEach(function(f){var el=document.getElementById('f_'+f);if(!el||data['f_'+f]===undefined)return;if(el.type==='checkbox')el.checked=data['f_'+f]===true||data['f_'+f]==='true';else el.value=data['f_'+f]||'';});
+  document.getElementById('membersContainer').innerHTML='';
+  if(data.members&&data.members.length)data.members.forEach(function(m){addMemberRow(m);});
+  document.getElementById('doctorsContainer').innerHTML='';
+  if(data.doctors&&data.doctors.length)data.doctors.forEach(function(d){addDoctorRow(d);});else addDoctorRow();
+  document.getElementById('medsContainer').innerHTML='';
+  if(data.meds&&data.meds.length)data.meds.forEach(function(m){addMedRow(m);});else addMedRow();
+  document.getElementById('ancilContainer').innerHTML='';
+  if(data.ancilPlans&&data.ancilPlans.length)data.ancilPlans.forEach(function(a){addAncilRow(a);});
+  var mcChecked=data.f_hasMedicare===true||data.f_hasMedicare==='true'||data.f_hasMedicare==='1';
+  var mcdChecked=data.f_hasMedicaid===true||data.f_hasMedicaid==='true'||data.f_hasMedicaid==='1';
+  document.getElementById('f_hasMedicare').checked=mcChecked;
+  document.getElementById('f_hasMedicaid').checked=mcdChecked;
+  document.getElementById('medicareFields').style.display=mcChecked?'block':'none';
+  document.getElementById('medicaidFields').style.display=mcdChecked?'block':'none';
+  if(data.f_resZip)restoreCounty(data.f_resZip,'res',data.f_resCounty);
+  if(data.f_billZip)restoreCounty(data.f_billZip,'bill',data.f_billCounty);
+  updateMemberCount();checkWaiveDental();calcTotalMonthly();
+  if(editingId)renderClientTodos(editingId);
+}
+function editClient(id){
+  var c=clients.find(function(x){return String(x._id)===String(id);});
+  if(!c){toast('Could not find client record. Please refresh and try again.','error');return;}
+  aiTrack('ClientRecordOpened',{clientId:id,clientName:(c.f_firstName||'')+' '+(c.f_lastName||'')});
+  trackRecentRecord(id,c);
+  editingId=id;
+  try{clearForm();}catch(e){console.log('clearForm err:',e);}
+  try{loadCarriersToSelect();}catch(e){}
+  try{setFormData(c);}catch(e){console.log('setFormData err:',e);}
+  document.getElementById('formTitle').textContent=(c.f_firstName||'')+' '+(c.f_lastName||'');
+  document.getElementById('deleteBtn').style.display='inline-block';
+  document.getElementById('deleteBtn2').style.display='inline-block';
+  showView('form_edit');
+  // Inject document upload section
+  var formCard=document.querySelector('#viewForm .form-card');
+  var existing=document.getElementById('clientDocsSection');
+  if(existing)existing.remove();
+  var docSec=document.createElement('div');
+  docSec.className='form-section';
+  docSec.id='clientDocsSection';
+  var actions=formCard.querySelector('.form-actions');
+  formCard.insertBefore(docSec,actions);
+  loadClientDocs(id);
+}
+function saveClient(){
+  var data=getFormData();
+  if(!data.f_firstName&&!data.f_lastName){toast('Please enter at least a first or last name.','error');return;}
+  var isNew=!editingId;
+  saveClientAPI(data,editingId).then(function(){
+    aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientName:(data.f_firstName||'')+' '+(data.f_lastName||''),clientId:editingId||'new'});
+    loadClients();showView('clients');toast('Client saved!','success');
+  }).catch(function(e){toast('Error: '+e,'error');});
+}
+function deleteClient(){
+  if(!editingId)return;
+  var c=clients.find(function(x){return String(x._id)===String(editingId);});
+  if(!confirm('Delete this client?'))return;
+  deleteClientAPI(editingId).then(function(){
+    aiTrack('ClientDeleted',{clientId:editingId,clientName:c?(c.f_firstName||'')+' '+(c.f_lastName||''):editingId});
+    loadClients();showView('clients');
+  });
+}
+
+function fmtMoney(el){
+  var v=el.value.replace(/[^0-9.]/g,'');
+  el.value=v;
+}
+function fmtMoneyBlur(el){
+  var v=parseFloat(el.value.replace(/[^0-9.]/g,''));
+  if(!isNaN(v))el.value='$'+v.toFixed(2);
+  else el.value='';
+}
+function formatPhone(el){var v=el.value.replace(/\D/g,'');if(v.length>=10)el.value='('+v.substr(0,3)+') '+v.substr(3,3)+'-'+v.substr(6,4);}
+function formatDate(el){var v=el.value.replace(/\D/g,'');if(v.length>4)v=v.substr(0,2)+'/'+v.substr(2,2)+'/'+v.substr(4,4);else if(v.length>2)v=v.substr(0,2)+'/'+v.substr(2);el.value=v;}
+function formatSSN(el){var v=el.value.replace(/\D/g,'').substr(0,9);if(v.length>5)el.value=v.substr(0,3)+'-'+v.substr(3,2)+'-'+v.substr(5,4);else if(v.length>3)el.value=v.substr(0,3)+'-'+v.substr(3);else el.value=v;}
+function formatMedicare(el){var v=el.value.toUpperCase().replace(/[^A-Z0-9]/g,'').substr(0,11);if(v.length>7)el.value=v.substr(0,4)+'-'+v.substr(4,3)+'-'+v.substr(7,4);else if(v.length>4)el.value=v.substr(0,4)+'-'+v.substr(4);else el.value=v;}
+function calcAge(){var v=document.getElementById('f_dob').value;if(!v)return;var d=new Date(v);var a=Math.floor((new Date()-d)/31557600000);if(!isNaN(a)&&a>=0&&a<120)document.getElementById('f_age').value=a;}
+function calcMemberAge(dobEl,ageId){var v=dobEl.value;if(!v)return;var d=new Date(v);var a=Math.floor((new Date()-d)/31557600000);var el=document.getElementById(ageId);if(el&&!isNaN(a)&&a>=0&&a<120)el.value=a;}
+function toggleReveal(id,btn){var el=document.getElementById(id);if(el.type==='password'){el.type='text';btn.textContent='Hide';}else{el.type='password';btn.textContent='Show';}}
+function focusReveal(el){el.type='text';}
+function blurReveal(el){el.type='password';}
+function copyField(id){var el=document.getElementById(id);var t=el.type;el.type='text';navigator.clipboard.writeText(el.value);el.type=t;}
+function copyText(txt){navigator.clipboard.writeText(txt);}
+function toggleMedicare(){document.getElementById('medicareFields').style.display=document.getElementById('f_hasMedicare').checked?'block':'none';}
+function toggleMedicaid(){document.getElementById('medicaidFields').style.display=document.getElementById('f_hasMedicaid').checked?'block':'none';}
+function toggleMailingAddress(){document.getElementById('mailingAddressSection').style.display=document.getElementById('f_sameAddress').checked?'none':'block';}
+function calcTotalIncome(){
+  var ids=['f_primaryIncome','f_spouseIncome','f_otherIncomeAmt1','f_otherIncomeAmt2','f_otherIncomeAmt3'];
+  var t=ids.reduce(function(s,id){var el=document.getElementById(id);return s+(el?parseFloat(el.value.replace(/[^0-9.]/g,''))||0:0);},0);
+  document.getElementById('f_totalIncome').value=t>0?'$'+t.toLocaleString():'';
+}
+function calcTotalMonthly(){
+  var h=parseFloat((document.getElementById('f_premium').value||'').replace(/[^0-9.]/g,''))||0;
+  var a=0;document.querySelectorAll('.ancil-row-data').forEach(function(row){var p=row.querySelector('[data-field="premium"]');a+=parseFloat((p&&p.value||'').replace(/[^0-9.]/g,''))||0;});
+  var appFee=parseFloat((document.getElementById('f_appFee').value||'').replace(/[^0-9.]/g,''))||0;
+  var totalMonthly=h+a;
+  var totalFirst=totalMonthly+appFee;
+  var disp=document.getElementById('totalMonthlyDisplay');if(disp)disp.textContent='$'+totalMonthly.toFixed(2);
+  var hid=document.getElementById('f_totalMonthly');if(hid)hid.value=totalMonthly>0?'$'+totalMonthly.toFixed(2):'';
+  var show=document.getElementById('f_totalMonthlyShow');if(show)show.value=totalMonthly>0?'$'+totalMonthly.toFixed(2):'';
+  var first=document.getElementById('f_totalFirstMonth');if(first)first.value=totalFirst>0?'$'+totalFirst.toFixed(2):'';
+}
+function checkWaiveDental(){
+  var has=Array.from(document.querySelectorAll('.ancil-row-data')).some(function(r){var t=r.querySelector('[data-field="type"]');return t&&t.value==='Dental';});
+  document.getElementById('waiveDentalField').style.display=has?'block':'none';
+}
+function updateMemberCount(){document.getElementById('memberCount').textContent=document.querySelectorAll('.member-row-data').length;}
+function populateCountySel(sel,counties,savedVal){
+  sel.innerHTML='';
+  if(!counties||!counties.length){var o=document.createElement('option');o.value='';o.textContent='';sel.appendChild(o);return;}
+  if(counties.length>1){var b=document.createElement('option');b.value='';b.textContent='';sel.appendChild(b);}
+  counties.forEach(function(cn){var o=document.createElement('option');o.value=cn;o.textContent=cn;if(savedVal&&cn===savedVal)o.selected=true;sel.appendChild(o);});
+  if(counties.length===1&&!savedVal)sel.options[0].selected=true;
+}
+function fetchCountyByLatLon(lat,lon,prefix,savedVal){
+  var sel=document.getElementById('f_'+prefix+'County');
+  fetch('https://geo.fcc.gov/api/census/area?lat='+lat+'&lon='+lon+'&format=json').then(function(r){return r.json();}).then(function(data){
+    var counties=[];var seen={};
+    if(data&&data.results&&data.results.length>0){data.results.forEach(function(result){if(result.county_name&&!seen[result.county_name]){seen[result.county_name]=true;counties.push(result.county_name);}});}
+    if(counties.length>0){populateCountySel(sel,counties,savedVal);}
+    else{sel.innerHTML='<option value=""></option>';}
+  }).catch(function(){sel.innerHTML='<option value=""></option>';});
+}
+function lookupZip(el,prefix){
+  var zip=el.value.replace(/\D/g,'');if(zip.length!==5)return;
+  fetch('https://api.zippopotam.us/us/'+zip).then(function(r){return r.json();}).then(function(data){
+    if(!data.places||!data.places.length)return;
+    document.getElementById('f_'+prefix+'City').value=data.places[0]['place name']||'';
+    document.getElementById('f_'+prefix+'St').value=data.places[0]['state abbreviation']||'';
+    var lat=data.places[0].latitude;var lon=data.places[0].longitude;
+    if(lat&&lon){fetchCountyByLatLon(lat,lon,prefix,null);}
+  }).catch(function(){});
+}
+function restoreCounty(zip,prefix,saved){
+  var z=(zip||'').replace(/\D/g,'');if(z.length!==5)return;
+  fetch('https://api.zippopotam.us/us/'+z).then(function(r){return r.json();}).then(function(data){
+    if(!data.places||!data.places.length)return;
+    var lat=data.places[0].latitude;var lon=data.places[0].longitude;
+    if(lat&&lon){fetchCountyByLatLon(lat,lon,prefix,saved);}
+  }).catch(function(){});
+}
+
+function addMemberRow(data){
+  var uid='m'+Date.now()+Math.floor(Math.random()*1000);
+  var div=document.createElement('div');div.className='member-row-data';
+  div.style.cssText='display:grid;grid-template-columns:1fr 0.25fr 1fr 0.7fr 0.5fr 0.5fr 0.5fr 0.35fr 0.35fr 0.65fr 0.35fr 1.2fr 0.5fr 30px;gap:5px;align-items:end;margin-bottom:6px;';
+  div.innerHTML=
+    mk('First Name','firstName',data)+mkS('MI','mi',data)+mk('Last Name','lastName',data)+
+    mkSel('Relation','relation',['','Spouse','Child','Mother','Father','Other'],data)+
+    mkSel('Married','married',['','Yes','No'],data)+
+    mkSel('Gender','gender',['','M','F'],data)+
+    mkSel('Tobacco','tobacco',['','Yes','No'],data)+
+    mkSmall('Height','height',data)+mkSmall('Weight','weight',data)+
+    '<div class="field"><label style="font-size:9px;">DOB</label><input type="date" data-field="dob" id="'+uid+'_dob" value="'+(data&&data.dob||'')+'" onchange="calcMemberAge(this,\''+uid+'_age\')" style="font-size:11px;padding:4px 5px;"></div>'+
+    '<div class="field"><label style="font-size:9px;">Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;font-size:11px;padding:4px 5px;max-width:45px;" value="'+(data&&data.age||'')+'"></div>'+
+    '<div class="field"><label style="font-size:9px;">SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11" style="font-size:11px;padding:4px 5px;width:100%;"></div>'+
+    mkSel('Insured','insured',['','Yes','No'],data)+
+    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="if(confirm(\'Remove this household member?\')){this.parentNode.remove();updateMemberCount();}">x</button>';
+  document.getElementById('membersContainer').appendChild(div);
+  updateMemberCount();
+}
+function mk(lbl,field,data){return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'" style="font-size:11px;padding:4px 5px;"></div>';}
+function mkS(lbl,field,data){return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'" maxlength="1" style="font-size:11px;padding:4px 5px;max-width:40px;"></div>';}
+function mkSmall(lbl,field,data){
+  var extra='';
+  if(field==='height')extra=' oninput="fmtHeight(this)"';
+  return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"'+extra+' style="font-size:11px;padding:4px 5px;max-width:50px;"></div>';
+}
+function mkC(lbl,field,data){return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'" style="font-size:11px;padding:4px 5px;"></div>';}
+function mkSelC(lbl,field,opts,data){var val=data&&data[field]||'';var options=opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('');return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><select data-field="'+field+'" style="font-size:11px;padding:4px 5px;">'+options+'</select></div>';}
+function mkSel(lbl,field,opts,data){
+  var val=data&&data[field]||'';
+  var options=opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('');
+  return '<div class="field"><label style="font-size:9px;">'+lbl+'</label><select data-field="'+field+'" style="font-size:11px;padding:4px 5px;">'+options+'</select></div>';
+}
+function addDoctorRow(data){
+  var div=document.createElement('div');div.className='doctor-row-data';
+  div.style.cssText='display:grid;grid-template-columns:2fr 1fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
+  div.innerHTML='<div class="field"><label>Doctor Name</label><input data-field="name" value="'+(data&&data.name||'')+'"></div>'+
+    '<div class="field"><label>Specialty / Phone</label><input data-field="specialty" value="'+(data&&data.specialty||'')+'"></div>'+
+    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="if(confirm(\'Remove this doctor?\'))this.parentNode.remove()">x</button>';
+  document.getElementById('doctorsContainer').appendChild(div);
+}
+
+var _customMeds=[];
+function loadCustomMeds(){try{_customMeds=JSON.parse(localStorage.getItem('crm_custom_meds')||'[]');}catch(e){_customMeds=[];}}
+function saveCustomMed(name){if(!name)return;var n=name.trim();if(!n)return;if(MED_LIST.indexOf(n)===-1&&_customMeds.indexOf(n)===-1){_customMeds.push(n);_customMeds.sort();localStorage.setItem('crm_custom_meds',JSON.stringify(_customMeds));}}
+loadCustomMeds();
+
+var MED_LIST=['Abilify','Acarbose','Accolate','Accupril','Aciphex','Actonel','Actos','Adderall','Adderall XR','Advair','Advair Diskus','Aggrenox','Aldactone','Alendronate','Albuterol','Aleve','Allopurinol','Alprazolam','Altace','Ambien','Ambien CR','Amlodipine','Amoxicillin','Amoxicillin-Clavulanate','Amphetamine','Anastrozole','Androgel','Apixaban','Aripiprazole','Aspirin','Atenolol','Atomoxetine','Atorvastatin','Ativan','Augmentin','Azithromycin','Baclofen','Basaglar','Benadryl','Benazepril','Benicar','Benzonatate','Bisoprolol','Brilinta','Breo','Budesonide','Buprenorphine','Bupropion','Buspirone','Byetta','Bydureon','Caduet','Calcitriol','Carbamazepine','Carbidopa-Levodopa','Carvedilol','Celebrex','Celexa','Cephalexin','Cetirizine','Chantix','Cialis','Ciprofloxacin','Citalopram','Clindamycin','Clobetasol','Clonazepam','Clonidine','Clopidogrel','Colchicine','Colcrys','Combivent','Concerta','Coreg','Coreg CR','Coumadin','Cozaar','Crestor','Cyclobenzaprine','Cymbalta','Dapagliflozin','Dexamethasone','Dexilant','Dextroamphetamine','Diazepam','Diclofenac','Digoxin','Diltiazem','Diphenhydramine','Donepezil','Doxazosin','Doxycycline','Dulaglutide','Duloxetine','Dupixent','Effexor','Effexor XR','Eliquis','Empagliflozin','Enalapril','Entresto','Epidiolex','Escitalopram','Esomeprazole','Estradiol','Evista','Ezetimibe','Famotidine','Farxiga','Fentanyl','Ferrous Sulfate','Fexofenadine','Finasteride','Flagyl','Flexeril','Flomax','Flovent','Fluconazole','Fluoxetine','Fluticasone','Fluticasone-Salmeterol','Folic Acid','Fosamax','Furosemide','Gabapentin','Glimepiride','Glipizide','Glucophage','Glucotrol','Glyburide','Humalog','Humulin','Humulin N','Humulin R','Hydrochlorothiazide','Hydrocodone','Hydrocodone-Acetaminophen','Hydrocortisone','Hydroxychloroquine','Hydroxyzine','Ibuprofen','Invega','Invokamet','Invokana','Ipratropium','Irbesartan','Isosorbide','Janumet','Januvia','Jardiance','Juvisync','Ketamine','Klonopin','Lamictal','Lamotrigine','Lansoprazole','Lantus','Lantus SoloStar','Latuda','Levemir','Levofloxacin','Levothyroxine','Lexapro','Linagliptin','Linzess','Liraglutide','Lisinopril','Lisinopril-HCTZ','Lithium','Lopressor','Loratadine','Lorazepam','Losartan','Lovastatin','Lozol','Lyrica','Mavyret','Medroxyprogesterone','Meloxicam','Metformin','Metformin ER','Methocarbamol','Methylphenidate','Methylprednisolone','Metoprolol','Metoprolol Succinate','Metoprolol Tartrate','Metronidazole','Mirtazapine','Monjaro','Montelukast','Morphine','Mounjaro','Mucinex','Naproxen','Neurontin','Nexium','Nifedipine','Nitrofurantoin','Nitroglycerin','Norco','Nortriptyline','Novolin','Novolog','Novolog FlexPen','Nuvaring','Olmesartan','Omeprazole','Ondansetron','Oseltamivir','Ozempic','Oxycodone','Oxycodone-Acetaminophen','Oxycontin','Pantoprazole','Paroxetine','Paxil','Penicillin','Percocet','Phenergan','Phentermine','Plavix','Potassium Chloride','Pradaxa','Pravastatin','Prednisone','Pregabalin','Premarin','Prilosec','Pristiq','Proair','Prolia','Promethazine','Propranolol','Protonix','Provigil','Prozac','Quetiapine','Ramipril','Ranexa','Ranitidine','Reclipsen','Renvela','Repaglinide','Restasis','Rexulti','Risperidone','Ritalin','Rivaroxaban','Rosiglitazone','Rosuvastatin','Rybelsus','Saxenda','Semaglutide','Senna','Seroquel','Sertraline','Simvastatin','Singulair','Sitagliptin','Skyrizi','Solifenacin','Spironolactone','Strattera','Sulfamethoxazole','Sumatriptan','Symbicort','Synthroid','Tacrolimus','Tamsulosin','Temazepam','Testosterone','Tiotropium','Tizanidine','Topamax','Topiramate','Torsemide','Toujeo','Tramadol','Tradjenta','Trazodone','Tresiba','Trulicity','Valacyclovir','Valium','Valsartan','Venlafaxine','Ventolin','Vesicare','Viberzi','Victoza','Viibryd','Vimpat','Vitamin B12','Vitamin D','Voltaren','Vraylar','Warfarin','Wegovy','Wellbutrin','Xanax','Xarelto','Xifaxan','Xolair','Zestril','Zetia','Ziprasidone','Zofran','Zoloft','Zolpidem','Zopiclone','Zyprexa','Zyrtec'];
+function getAllMeds(){return MED_LIST.concat(_customMeds).sort(function(a,b){return a.toLowerCase()<b.toLowerCase()?-1:1;});}
+function addMedRow(data){
+  var div=document.createElement('div');div.className='med-row-data';
+  div.style.cssText='display:grid;grid-template-columns:2fr 80px 1fr auto 30px;gap:6px;align-items:end;margin-bottom:6px;position:relative;';
+  div.innerHTML='<div class="field autocomplete-wrap"><label>Medication Name</label><input data-field="name" placeholder="Start typing..." value="'+(data&&data.name||'')+'" oninput="medAC(this)" onblur="medBlur(this)" autocomplete="off"><div class="autocomplete-list"></div></div>'+
+    '<div class="field"><label>Mg</label><input data-field="mg" value="'+(data&&data.mg||'')+'"></div>'+
+    '<div class="field"><label>Frequency</label><input data-field="frequency" value="'+(data&&data.frequency||'')+'"></div>'+
+    '<button class="btn" style="padding:3px 8px;align-self:flex-end;font-size:10px;white-space:nowrap;background:#e8f4ec;border-color:#28a745;color:#28a745;" onclick="saveMedFromRow(this)" title="Save this medication to your list">+ Save Med</button>'+
+    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="if(confirm(\'Remove this medication?\'))this.parentNode.remove()">x</button>';
+  document.getElementById('medsContainer').appendChild(div);
+}
+function saveMedFromRow(btn){
+  var row=btn.closest('.med-row-data');
+  var nameEl=row.querySelector('[data-field="name"]');
+  var name=(nameEl&&nameEl.value||'').trim();
+  if(!name){toast('Please enter a medication name first.','error');return;}
+  if(MED_LIST.indexOf(name)!==-1||_customMeds.indexOf(name)!==-1){toast('"'+name+'" is already in your medication list!','info');return;}
+  saveCustomMed(name);
+  btn.textContent='✓ Saved!';btn.style.background='#d1fae5';btn.disabled=true;
+  setTimeout(function(){btn.textContent='+ Save Med';btn.style.background='#e8f4ec';btn.disabled=false;},2000);
+}
+function medAC(el){
+  var v=el.value.toLowerCase();var list=el.parentNode.querySelector('.autocomplete-list');
+  if(!v||v.length<2){list.style.display='none';return;}
+  var allMeds=getAllMeds();
+  var m=allMeds.filter(function(x){return x.toLowerCase().startsWith(v);}).slice(0,8);
+  if(!m.length){list.style.display='none';return;}
+  list.innerHTML='';m.forEach(function(med){var d=document.createElement('div');d.textContent=med;var isCustom=_customMeds.indexOf(med)!==-1;if(isCustom)d.style.cssText='color:#065f46;font-style:italic;';d.addEventListener('mousedown',function(e){e.preventDefault();el.value=med;list.style.display='none';});list.appendChild(d);});
+  list.style.display='block';
+}
+function medBlur(el){setTimeout(function(){var list=el.parentNode.querySelector('.autocomplete-list');if(list)list.style.display='none';},200);}
+document.addEventListener('click',function(e){if(!e.target.closest('.autocomplete-wrap'))document.querySelectorAll('.autocomplete-list').forEach(function(l){l.style.display='none';});});
+var EMAIL_DOMAINS=['gmail.com','yahoo.com','icloud.com','outlook.com','hotmail.com','aol.com','comcast.net','att.net','verizon.net','me.com','msn.com','live.com'];
+function emailAC(el){
+  var v=el.value;var list=el.parentNode.querySelector('.autocomplete-list');
+  var atIdx=v.lastIndexOf('@');
+  if(atIdx<0){list.style.display='none';return;}
+  var local=v.substring(0,atIdx+1);var typed=v.substring(atIdx+1).toLowerCase();
+  var matches=EMAIL_DOMAINS.filter(function(d){return d.startsWith(typed);}).slice(0,6);
+  if(!matches.length){list.style.display='none';return;}
+  list.innerHTML='';
+  matches.forEach(function(d){var div=document.createElement('div');div.textContent=local+d;div.addEventListener('mousedown',function(e){e.preventDefault();el.value=local+d;list.style.display='none';});list.appendChild(div);});
+  list.style.display='block';
+}
+
+function addAncilRow(data){
+  var type=data?data.type:document.getElementById('ancilTypeSelect').value;
+  if(!type){toast('Please select a plan type first.','error');return;}
+  document.getElementById('ancilTypeSelect').value='';
+  var div=document.createElement('div');div.className='ancil-row-data';
+  div.style.cssText='display:grid;grid-template-columns:0.7fr 1.5fr 0.7fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
+  div.innerHTML='<div class="field"><label>Type</label><input data-field="type" value="'+type+'" readonly style="background:#f0f7ff;font-size:11px;"></div>'+
+    '<div class="field"><label>Plan Name</label><input data-field="planName" value="'+(data&&data.planName||'')+'"></div>'+
+    '<div class="field"><label>Premium</label><input data-field="premium" placeholder="$" value="'+(data&&data.premium||'')+'" oninput="fmtMoney(this);calcTotalMonthly()" onblur="fmtMoneyBlur(this);calcTotalMonthly()"></div>'+
+    '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="if(confirm(\'Remove this ancillary plan?\')){this.parentNode.remove();checkWaiveDental();calcTotalMonthly();}">x</button>';
+  // Insert before waive dental field so dental rows appear above it
+  var container=document.getElementById('ancilContainer');
+  container.appendChild(div);
+  checkWaiveDental();calcTotalMonthly();
+}
+
+function toggleSelectAll(cb){document.querySelectorAll('.row-cb').forEach(function(c){c.checked=cb.checked;});updateBulkBtn();}
+function updateBulkBtn(){var n=document.querySelectorAll('.row-cb:checked').length;var btn=document.getElementById('bulkDeleteBtn');btn.style.display=n>0?'inline-block':'none';btn.textContent='Delete Selected ('+n+')';}
+function bulkDelete(){
+  var ids=Array.from(document.querySelectorAll('.row-cb:checked')).map(function(cb){return cb.dataset.id;});
+  if(!ids.length)return;if(!confirm('Delete '+ids.length+' client(s)?'))return;
+  Promise.all(ids.map(function(id){return deleteClientAPI(id);})).then(function(){loadClients();document.getElementById('bulkDeleteBtn').style.display='none';});
+}
+
+function renderReportCards(){
+  var yr=new Date().getFullYear();
+  function age(c){if(!c.f_dob)return null;var y=c.f_dob.split('/')[2]||c.f_dob.split('-')[0];return yr-parseInt(y);}
+  var cards=[
+    {num:clients.length,label:'Total Clients',filter:'all'},
+    {num:clients.filter(function(c){var a=age(c);return a===64||a===65;}).length,label:'Turning 65 This Year',filter:'turning65'},
+    {num:clients.filter(function(c){var a=age(c);return a===25||a===26;}).length,label:'Turning 26 This Year',filter:'turning26'},
+    {num:clients.filter(function(c){return c.f_planType==='ACA/Marketplace';}).length,label:'ACA/Marketplace',filter:'aca'},
+    {num:clients.filter(function(c){return c.f_planType==='Medicare';}).length,label:'Medicare',filter:'medicare'},
+    {num:'$'+Math.round(clients.reduce(function(s,c){return s+(parseFloat((c.f_premium||'').replace(/[^0-9.]/g,''))||0);},0)).toLocaleString(),label:'Total Monthly Premium',filter:'all'}
+  ];
+  var container=document.getElementById('reportCards');container.innerHTML='';
+  cards.forEach(function(card){var div=document.createElement('div');div.className='report-card';div.innerHTML='<div class="num">'+card.num+'</div><div class="lbl">'+card.label+'</div>';div.addEventListener('click',function(){runReport(card.filter,card.label);});container.appendChild(div);});
+}
+function runReport(filter,title){
+  var yr=new Date().getFullYear();function age(c){if(!c.f_dob)return null;var y=c.f_dob.split('/')[2]||c.f_dob.split('-')[0];return yr-parseInt(y);}
+  var data=clients;
+  if(filter==='turning65')data=clients.filter(function(c){var a=age(c);return a===64||a===65;});
+  else if(filter==='turning26')data=clients.filter(function(c){var a=age(c);return a===25||a===26;});
+  else if(filter==='aca')data=clients.filter(function(c){return c.f_planType==='ACA/Marketplace';});
+  else if(filter==='medicare')data=clients.filter(function(c){return c.f_planType==='Medicare';});
+  currentReportData=data;
+  document.getElementById('reportTitle').textContent=title+' ('+data.length+')';
+  document.getElementById('reportTableHead').innerHTML='<tr><th>Name</th><th>DOB</th><th>Phone</th><th>Email</th><th>Plan</th><th>Premium</th><th>Agent</th></tr>';
+  var tbody=document.getElementById('reportTableBody');tbody.innerHTML='';
+  data.forEach(function(c){var tr=document.createElement('tr');tr.innerHTML='<td>'+(c.f_firstName||'')+' '+(c.f_lastName||'')+'</td><td>'+(c.f_dob||'')+'</td><td>'+(c.f_phone||'')+'</td><td>'+(c.f_email||'')+'</td><td>'+(c.f_planType||'')+'</td><td>'+(c.f_premium?'$'+c.f_premium:'')+'</td><td>'+(c.f_agent||'')+'</td>';tbody.appendChild(tr);});
+  document.getElementById('reportResult').style.display='block';
+}
+function exportReportExcel(){
+  var rows=[['Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Agent']];
+  currentReportData.forEach(function(c){rows.push([(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_agent||'']);});
+  dlXLSX(rows,'report.xlsx');
+}
+function exportExcel(){
+  var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Subsidy','Agent','Lead Source','Renewed']];
+  clients.forEach(function(c){rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_subsidy||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'']);});
+  dlXLSX(rows,'clients.xlsx');
+}
+function dlXLSX(rows,filename){
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Data');
+  XLSX.writeFile(wb,filename);
+}
+
+var CRM_IMPORT_FIELDS=[
+  {key:'f_firstName',label:'First Name'},{key:'f_lastName',label:'Last Name'},
+  {key:'f_dob',label:'Date of Birth'},{key:'f_gender',label:'Gender'},{key:'f_ssn',label:'SSN'},
+  {key:'f_phone',label:'Phone'},{key:'f_email',label:'Email'},{key:'f_resAddress',label:'Address'},
+  {key:'f_resCity',label:'City'},{key:'f_resSt',label:'State'},{key:'f_resZip',label:'Zip'},
+  {key:'f_planName',label:'Plan Name'},{key:'f_planType',label:'Plan Type'},{key:'f_premium',label:'Premium'},
+  {key:'f_subsidy',label:'Subsidy'},{key:'f_agent',label:'Agent'},{key:'f_leadSource',label:'Lead Source'},
+  {key:'f_healthEffective',label:'Health Effective'},{key:'f_totalMonthly',label:'Total Monthly'},
+  {key:'f_medicareNum',label:'Medicare #'},{key:'f_medicaid',label:'Medicaid #'},{key:'f_notes',label:'Notes'}
+];
+function handleCSV(event){
+  var file=event.target.files[0];if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var lines=e.target.result.split('\n').filter(function(l){return l.trim();});
+    csvHeaders=lines[0].split(',').map(function(h){return h.trim().replace(/"/g,'');});
+    csvData=lines.slice(1).map(function(line){var vals=line.split(',').map(function(v){return v.trim().replace(/"/g,'');});var obj={};csvHeaders.forEach(function(h,i){obj[h]=vals[i]||'';});return obj;});
+    var tbody=document.getElementById('mappingBody');tbody.innerHTML='';
+    CRM_IMPORT_FIELDS.forEach(function(f){
+      var tr=document.createElement('tr');
+      var opts='<option value="">-- Skip --</option>'+csvHeaders.map(function(h){var match=h.toLowerCase().replace(/[^a-z]/g,'').includes(f.label.toLowerCase().replace(/[^a-z]/g,'').substr(0,4));return '<option value="'+h+'" '+(match?'selected':'')+'>'+h+'</option>';}).join('');
+      tr.innerHTML='<td>'+f.label+'</td><td><select id="map_'+f.key+'">'+opts+'</select></td>';
+      tbody.appendChild(tr);
+    });
+    document.getElementById('mappingSection').style.display='block';
+  };
+  reader.readAsText(file);
+}
+function importClients(){
+  var imported=0;
+  var promises=csvData.map(function(row){
+    var data={};CRM_IMPORT_FIELDS.forEach(function(f){var col=document.getElementById('map_'+f.key);if(col&&col.value&&row[col.value]!==undefined)data[f.key]=row[col.value];});
+    data.f_agent=data.f_agent||'Thomas Jaboro';
+    return saveClientAPI(data,null).then(function(){imported++;});
+  });
+  Promise.all(promises).then(function(){document.getElementById('importStatus').textContent='Imported '+imported+' clients!';loadClients();}).catch(function(e){document.getElementById('importStatus').textContent='Error: '+e;});
+}
+
+// CARRIER MANAGEMENT
+function loadCarriers(){
+  var saved=localStorage.getItem('crmCarriers');
+  carriers=saved?JSON.parse(saved):[];
+}
+function saveCarriers(){
+  localStorage.setItem('crmCarriers',JSON.stringify(carriers));
+}
+function addCarrier(){
+  var name=prompt('Enter carrier name:');
+  if(!name)return;
+  carriers.push({name:name,contact:'',phone:'',email:''});
+  saveCarriers();
+  renderCarriers();
+}
+function renderCarriers(){
+  var container=document.getElementById('carrierList');
+  if(!container)return;
+  container.innerHTML='';
+  if(carriers.length===0){
+    container.innerHTML='<p style="text-align:center;padding:20px;color:#999;">No carriers yet. Click "+ Add Carrier" to add one.</p>';
+    return;
+  }
+  carriers.forEach(function(c,idx){
+    var div=document.createElement('div');
+    div.style.cssText='display:grid;grid-template-columns:1.5fr 1fr 0.8fr 30px;gap:8px;align-items:end;margin-bottom:8px;';
+    div.innerHTML='<div class="field"><label>Carrier Name</label><input value="'+c.name+'" oninput="carriers['+idx+'].name=this.value;saveCarriers();"></div>'+
+      '<div class="field"><label>Contact Person</label><input value="'+(c.contact||'')+'" oninput="carriers['+idx+'].contact=this.value;saveCarriers();"></div>'+
+      '<div class="field"><label>Phone</label><input value="'+(c.phone||'')+'" oninput="carriers['+idx+'].phone=this.value;saveCarriers();"></div>'+
+      '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="carriers.splice('+idx+',1);saveCarriers();renderCarriers();">x</button>';
+    container.appendChild(div);
+  });
+}
+
+function loadCarriersToSelect(){
+  var sel=document.getElementById('f_planCarrier');
+  if(sel){
+    sel.innerHTML='<option value="">Select</option>';
+    carriers.forEach(function(c){
+      var opt=document.createElement('option');
+      opt.value=c.name;
+      opt.textContent=c.name;
+      sel.appendChild(opt);
+    });
+  }
+}
+
+// CUSTOM REPORT BUILDER
+function generateCustomReport(){
+  var fields=[];
+  var allFields=['name','dob','age','gender','marital','tobacco','phone','altPhone','email','email2','address','city','state','zip','county',
+    'planType','planName','carrier','level','type','deductible','premium','subsidy','totalMonthly','healthEffective','medicare','medicaid',
+    'agent','leadSource','leadDate','renewed','submittedBy',
+    'bankName','accountType','routing','account','accountName','cardType','cardNumber','cardExp',
+    'primaryEmployer','primaryIncome','spouseEmployer','spouseIncome','otherIncome1','otherIncomeAmt1','otherIncome2','otherIncomeAmt2','totalIncome',
+    'notes'];
+  allFields.forEach(function(f){
+    if(document.getElementById('rpt_'+f)&&document.getElementById('rpt_'+f).checked)fields.push(f);
+  });
+  
+  var filterPlanType=document.getElementById('rpt_filterPlanType').value;
+  var filterAgent=document.getElementById('rpt_filterAgent').value;
+  var filterRenewed=document.getElementById('rpt_filterRenewed').value;
+  var filterLeadSource=document.getElementById('rpt_filterLeadSource').value;
+  var filterCarrier=document.getElementById('rpt_filterCarrier').value;
+  var filterMedicare=document.getElementById('rpt_filterMedicare').value;
+  var filterMedicaid=document.getElementById('rpt_filterMedicaid').value;
+  
+  var data=clients.filter(function(c){
+    if(filterPlanType&&c.f_planType!==filterPlanType)return false;
+    if(filterAgent&&c.f_agent!==filterAgent)return false;
+    if(filterRenewed&&c.f_renewed!==filterRenewed)return false;
+    if(filterLeadSource&&c.f_leadSource!==filterLeadSource)return false;
+    if(filterCarrier&&c.f_planCarrier!==filterCarrier)return false;
+    if(filterMedicare==='yes'&&!c.f_hasMedicare)return false;
+    if(filterMedicare==='no'&&c.f_hasMedicare)return false;
+    if(filterMedicaid==='yes'&&!c.f_hasMedicaid)return false;
+    if(filterMedicaid==='no'&&c.f_hasMedicaid)return false;
+    return true;
+  });
+  
+  customReportData=data;
+  document.getElementById('customReportCount').textContent=data.length;
+  
+  var fieldLabels={
+    name:'Name',dob:'Birth Date',age:'Age',gender:'Gender',marital:'Marital Status',tobacco:'Tobacco',
+    phone:'Phone',altPhone:'Alt Phone',email:'Email',email2:'Email 2',address:'Address',city:'City',state:'State',zip:'Zip',county:'County',
+    planType:'Plan Type',planName:'Plan Name',carrier:'Carrier',level:'Plan Level',type:'Type (HMO/PPO)',deductible:'Deductible',
+    premium:'Premium',subsidy:'Subsidy',totalMonthly:'Total Monthly',healthEffective:'Health Effective',medicare:'Medicare',medicaid:'Medicaid',
+    agent:'Agent',leadSource:'Lead Source',leadDate:'Lead Date',renewed:'Renewed',submittedBy:'Submitted By',
+    bankName:'Bank Name',accountType:'Account Type',routing:'Routing',account:'Account Number',accountName:'Account Name',
+    cardType:'Card Type',cardNumber:'Card Number',cardExp:'Card Exp',
+    primaryEmployer:'Primary Employer',primaryIncome:'Primary Income',spouseEmployer:'Spouse Employer',spouseIncome:'Spouse Income',
+    otherIncome1:'Other Income 1',otherIncomeAmt1:'Other Income Amt 1',otherIncome2:'Other Income 2',otherIncomeAmt2:'Other Income Amt 2',
+    totalIncome:'Total Income',notes:'Notes'
+  };
+  
+  var table='<table class="client-table"><thead><tr>';
+  fields.forEach(function(f){table+='<th>'+(fieldLabels[f]||f)+'</th>';});
+  table+='</tr></thead><tbody>';
+  
+  data.forEach(function(c){
+    table+='<tr>';
+    fields.forEach(function(f){
+      var val='';
+      if(f==='name')val=(c.f_firstName||'')+' '+(c.f_lastName||'');
+      else if(f==='dob')val=c.f_dob||'';
+      else if(f==='age'){if(c.f_dob){var parts=c.f_dob.split(/[-/]/);if(parts.length>=3){var year=parts[0].length===4?parseInt(parts[0]):parseInt(parts[2]);val=new Date().getFullYear()-year;}}}
+      else if(f==='gender')val=c.f_gender||'';
+      else if(f==='marital')val=c.f_marital||'';
+      else if(f==='tobacco')val=c.f_tobacco||'';
+      else if(f==='phone')val=c.f_phone||'';
+      else if(f==='altPhone')val=c.f_altPhone||'';
+      else if(f==='email')val=c.f_email||'';
+      else if(f==='email2')val=c.f_email2||'';
+      else if(f==='address')val=c.f_resAddress||'';
+      else if(f==='city')val=c.f_resCity||'';
+      else if(f==='state')val=c.f_resSt||'';
+      else if(f==='zip')val=c.f_resZip||'';
+      else if(f==='county')val=c.f_resCounty||'';
+      else if(f==='planType')val=c.f_planType||'';
+      else if(f==='planName')val=c.f_planName||'';
+      else if(f==='carrier')val=c.f_planCarrier||'';
+      else if(f==='level')val=c.f_level||'';
+      else if(f==='type')val=c.f_type||'';
+      else if(f==='deductible')val=c.f_deductible||'';
+      else if(f==='premium')val=c.f_premium||'';
+      else if(f==='subsidy')val=c.f_subsidy||'';
+      else if(f==='totalMonthly')val=c.f_totalMonthly||'';
+      else if(f==='healthEffective')val=c.f_healthEffective||'';
+      else if(f==='medicare')val=c.f_hasMedicare?'Yes':'No';
+      else if(f==='medicaid')val=c.f_hasMedicaid?'Yes':'No';
+      else if(f==='agent')val=c.f_agent||'';
+      else if(f==='leadSource')val=c.f_leadSource||'';
+      else if(f==='leadDate')val=c.f_leadDate||'';
+      else if(f==='renewed')val=c.f_renewed||'';
+      else if(f==='submittedBy')val=c.f_submittedBy||'';
+      else if(f==='bankName')val=c.f_bankName||'';
+      else if(f==='accountType')val=c.f_accountType||'';
+      else if(f==='routing')val=c.f_routing||'';
+      else if(f==='account')val=c.f_account||'';
+      else if(f==='accountName')val=c.f_accountName||'';
+      else if(f==='cardType')val=c.f_cardType||'';
+      else if(f==='cardNumber')val=c.f_cardNumber||'';
+      else if(f==='cardExp')val=c.f_cardExp||'';
+      else if(f==='primaryEmployer')val=c.f_primaryEmployer||'';
+      else if(f==='primaryIncome')val=c.f_primaryIncome||'';
+      else if(f==='spouseEmployer')val=c.f_spouseEmployer||'';
+      else if(f==='spouseIncome')val=c.f_spouseIncome||'';
+      else if(f==='otherIncome1')val=c.f_otherIncome1||'';
+      else if(f==='otherIncomeAmt1')val=c.f_otherIncomeAmt1||'';
+      else if(f==='otherIncome2')val=c.f_otherIncome2||'';
+      else if(f==='otherIncomeAmt2')val=c.f_otherIncomeAmt2||'';
+      else if(f==='totalIncome')val=c.f_totalIncome||'';
+      else if(f==='notes')val=c.f_notes||'';
+      table+='<td>'+val+'</td>';
+    });
+    table+='</tr>';
+  });
+  table+='</tbody></table>';
+  
+  document.getElementById('customReportTable').innerHTML=table;
+  document.getElementById('customReportResults').style.display='block';
+}
+
+function exportCustomReport(){
+  if(!customReportData||customReportData.length===0){toast('Generate a report first.','error');return;}
+  
+  var fields=[];
+  var fieldLabels={
+    name:'Name',dob:'Birth Date',age:'Age',gender:'Gender',marital:'Marital Status',tobacco:'Tobacco',
+    phone:'Phone',altPhone:'Alt Phone',email:'Email',email2:'Email 2',address:'Address',city:'City',state:'State',zip:'Zip',county:'County',
+    planType:'Plan Type',planName:'Plan Name',carrier:'Carrier',level:'Plan Level',type:'Type (HMO/PPO)',deductible:'Deductible',
+    premium:'Premium',subsidy:'Subsidy',totalMonthly:'Total Monthly',healthEffective:'Health Effective',medicare:'Medicare',medicaid:'Medicaid',
+    agent:'Agent',leadSource:'Lead Source',leadDate:'Lead Date',renewed:'Renewed',submittedBy:'Submitted By',
+    bankName:'Bank Name',accountType:'Account Type',routing:'Routing',account:'Account Number',accountName:'Account Name',
+    cardType:'Card Type',cardNumber:'Card Number',cardExp:'Card Exp',
+    primaryEmployer:'Primary Employer',primaryIncome:'Primary Income',spouseEmployer:'Spouse Employer',spouseIncome:'Spouse Income',
+    otherIncome1:'Other Income 1',otherIncomeAmt1:'Other Income Amt 1',otherIncome2:'Other Income 2',otherIncomeAmt2:'Other Income Amt 2',
+    totalIncome:'Total Income',notes:'Notes'
+  };
+  
+  var allFields=['name','dob','age','gender','marital','tobacco','phone','altPhone','email','email2','address','city','state','zip','county',
+    'planType','planName','carrier','level','type','deductible','premium','subsidy','totalMonthly','healthEffective','medicare','medicaid',
+    'agent','leadSource','leadDate','renewed','submittedBy',
+    'bankName','accountType','routing','account','accountName','cardType','cardNumber','cardExp',
+    'primaryEmployer','primaryIncome','spouseEmployer','spouseIncome','otherIncome1','otherIncomeAmt1','otherIncome2','otherIncomeAmt2','totalIncome',
+    'notes'];
+    
+  var headers=[];
+  allFields.forEach(function(f){
+    if(document.getElementById('rpt_'+f)&&document.getElementById('rpt_'+f).checked){
+      fields.push(f);
+      headers.push(fieldLabels[f]||f);
+    }
+  });
+  
+  var rows=[headers];
+  customReportData.forEach(function(c){
+    var row=[];
+    fields.forEach(function(f){
+      var val='';
+      if(f==='name')val=(c.f_firstName||'')+' '+(c.f_lastName||'');
+      else if(f==='dob')val=c.f_dob||'';
+      else if(f==='age'){if(c.f_dob){var parts=c.f_dob.split(/[-/]/);if(parts.length>=3){var year=parts[0].length===4?parseInt(parts[0]):parseInt(parts[2]);val=new Date().getFullYear()-year;}}}
+      else if(f==='gender')val=c.f_gender||'';
+      else if(f==='marital')val=c.f_marital||'';
+      else if(f==='tobacco')val=c.f_tobacco||'';
+      else if(f==='phone')val=c.f_phone||'';
+      else if(f==='altPhone')val=c.f_altPhone||'';
+      else if(f==='email')val=c.f_email||'';
+      else if(f==='email2')val=c.f_email2||'';
+      else if(f==='address')val=c.f_resAddress||'';
+      else if(f==='city')val=c.f_resCity||'';
+      else if(f==='state')val=c.f_resSt||'';
+      else if(f==='zip')val=c.f_resZip||'';
+      else if(f==='county')val=c.f_resCounty||'';
+      else if(f==='planType')val=c.f_planType||'';
+      else if(f==='planName')val=c.f_planName||'';
+      else if(f==='carrier')val=c.f_planCarrier||'';
+      else if(f==='level')val=c.f_level||'';
+      else if(f==='type')val=c.f_type||'';
+      else if(f==='deductible')val=c.f_deductible||'';
+      else if(f==='premium')val=c.f_premium||'';
+      else if(f==='subsidy')val=c.f_subsidy||'';
+      else if(f==='totalMonthly')val=c.f_totalMonthly||'';
+      else if(f==='healthEffective')val=c.f_healthEffective||'';
+      else if(f==='medicare')val=c.f_hasMedicare?'Yes':'No';
+      else if(f==='medicaid')val=c.f_hasMedicaid?'Yes':'No';
+      else if(f==='agent')val=c.f_agent||'';
+      else if(f==='leadSource')val=c.f_leadSource||'';
+      else if(f==='leadDate')val=c.f_leadDate||'';
+      else if(f==='renewed')val=c.f_renewed||'';
+      else if(f==='submittedBy')val=c.f_submittedBy||'';
+      else if(f==='bankName')val=c.f_bankName||'';
+      else if(f==='accountType')val=c.f_accountType||'';
+      else if(f==='routing')val=c.f_routing||'';
+      else if(f==='account')val=c.f_account||'';
+      else if(f==='accountName')val=c.f_accountName||'';
+      else if(f==='cardType')val=c.f_cardType||'';
+      else if(f==='cardNumber')val=c.f_cardNumber||'';
+      else if(f==='cardExp')val=c.f_cardExp||'';
+      else if(f==='primaryEmployer')val=c.f_primaryEmployer||'';
+      else if(f==='primaryIncome')val=c.f_primaryIncome||'';
+      else if(f==='spouseEmployer')val=c.f_spouseEmployer||'';
+      else if(f==='spouseIncome')val=c.f_spouseIncome||'';
+      else if(f==='otherIncome1')val=c.f_otherIncome1||'';
+      else if(f==='otherIncomeAmt1')val=c.f_otherIncomeAmt1||'';
+      else if(f==='otherIncome2')val=c.f_otherIncome2||'';
+      else if(f==='otherIncomeAmt2')val=c.f_otherIncomeAmt2||'';
+      else if(f==='totalIncome')val=c.f_totalIncome||'';
+      else if(f==='notes')val=c.f_notes||'';
+      row.push(val);
+    });
+    rows.push(row);
+  });
+  
+  dlXLSX(rows,'custom_report.xlsx');
+}
+
+// ===================== HEIGHT FORMATTER =====================
+function fmtHeight(el){
+  var raw=el.value.replace(/[^0-9]/g,'');
+  if(!raw){return;}
+  if(raw.length===1){el.value=raw;}
+  else if(raw.length===2){
+    // Could be feet only (e.g. "50" → "5'0") or partial
+    el.value=raw[0]+"'"+raw[1];
+  } else if(raw.length===3){
+    el.value=raw[0]+"'"+raw.slice(1);
+  } else if(raw.length>=4){
+    el.value=raw[0]+"'"+raw.slice(1,3)+'"';
+  }
+}
+
+// ===================== RECENT RECORDS =====================
+var _recentRecords=[];
+function loadRecentRecords(){try{_recentRecords=JSON.parse(localStorage.getItem('crm_recent')||'[]');}catch(e){_recentRecords=[];}}
+function saveRecentRecords(){localStorage.setItem('crm_recent',JSON.stringify(_recentRecords));}
+loadRecentRecords();
+function trackRecentRecord(id,c){
+  var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()||'Unknown';
+  _recentRecords=_recentRecords.filter(function(r){return String(r.id)!==String(id);});
+  _recentRecords.unshift({id:id,name:name,planType:c.f_planType||'',agent:c.f_agent||'',accessed:new Date().toISOString()});
+  if(_recentRecords.length>20)_recentRecords=_recentRecords.slice(0,20);
+  saveRecentRecords();
+}
+function renderRecentRecords(){
+  var el=document.getElementById('recentRecordsList');
+  var empty=document.getElementById('recentRecordsEmpty');
+  if(!el)return;
+  if(!_recentRecords.length){el.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  el.innerHTML='';
+  _recentRecords.forEach(function(r,i){
+    var when=new Date(r.accessed);
+    var whenStr=when.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' '+when.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    var div=document.createElement('div');
+    div.style.cssText='display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;transition:background 0.1s;';
+    div.onmouseover=function(){this.style.background='#f0f4f8';};
+    div.onmouseout=function(){this.style.background='';};
+    div.innerHTML=
+      '<div style="width:24px;height:24px;border-radius:50%;background:#1a3a5c;color:#fff;font-size:11px;font-weight:bold;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'+(i+1)+'</div>'+
+      '<div style="flex:1;">'+
+        '<div style="font-weight:600;font-size:13px;color:#1a3a5c;">'+r.name+'</div>'+
+        '<div style="font-size:11px;color:#666;margin-top:2px;">'+(r.planType?'<span style="background:#dbeafe;color:#1a3a5c;padding:1px 6px;border-radius:8px;font-size:10px;margin-right:6px;">'+r.planType+'</span>':'')+(r.agent||'')+'</div>'+
+      '</div>'+
+      '<div style="font-size:10px;color:#999;white-space:nowrap;">'+whenStr+'</div>'+
+      '<button class="btn btn-blue" style="padding:4px 10px;font-size:11px;">Open</button>';
+    div.querySelector('.btn').addEventListener('click',function(e){e.stopPropagation();editClient(r.id);});
+    div.addEventListener('click',function(){editClient(r.id);});
+    el.appendChild(div);
+  });
+}
+function clearRecentRecords(){
+  if(!confirm('Clear recent records history?'))return;
+  _recentRecords=[];saveRecentRecords();renderRecentRecords();
+}
+
+// ===================== TODO CLIENT AUTOCOMPLETE =====================
+function todoClientAC(el){
+  var v=el.value.toLowerCase().trim();
+  var list=document.getElementById('todoClientList');
+  document.getElementById('todoClientId').value='';
+  if(!v||v.length<2){list.style.display='none';return;}
+  var matches=clients.filter(function(c){
+    var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).toLowerCase();
+    return name.includes(v);
+  }).slice(0,8);
+  if(!matches.length){list.style.display='none';return;}
+  list.innerHTML='';
+  matches.forEach(function(c){
+    var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).trim();
+    var d=document.createElement('div');
+    d.innerHTML='<strong>'+name+'</strong><span style="font-size:10px;color:#666;margin-left:6px;">'+(c.f_planType||'')+'</span>';
+    d.style.cssText='padding:6px 8px;cursor:pointer;';
+    d.addEventListener('mousedown',function(e){
+      e.preventDefault();
+      el.value=name;
+      document.getElementById('todoClientId').value=c._id;
+      list.style.display='none';
+    });
+    list.appendChild(d);
+  });
+  list.style.display='block';
+}
+
+// ===================== TODO - updated saveTodo with client link =====================
+function saveTodo(){
+  var task=document.getElementById('todoTaskInput').value.trim();
+  if(!task)return;
+  var due=document.getElementById('todoDueInput').value;
+  var priority=document.getElementById('todoPriorityInput').value;
+  var clientId=document.getElementById('todoClientId').value||'';
+  var clientName=document.getElementById('todoClientInput').value.trim()||'';
+  _todos.unshift({id:Date.now(),task:task,due:due,priority:priority,done:false,created:new Date().toISOString(),clientId:clientId,clientName:clientId?clientName:''});
+  saveTodos();
+  document.getElementById('todoAddSection').style.display='none';
+  document.getElementById('todoClientInput').value='';
+  document.getElementById('todoClientId').value='';
+  renderTodos();
+}
+
+// ===================== ADVANCED SEARCH - add create date filter =====================
+function runAdvSearch(){
+  var fn=(document.getElementById('as_firstName').value||'').toLowerCase().trim();
+  var ln=(document.getElementById('as_lastName').value||'').toLowerCase().trim();
+  var dobStart=document.getElementById('as_dobStart').value;
+  var dobEnd=document.getElementById('as_dobEnd').value;
+  var agent=document.getElementById('as_agent').value;
+  var gender=document.getElementById('as_gender').value;
+  var tobacco=document.getElementById('as_tobacco').value;
+  var marital=document.getElementById('as_marital').value;
+  var planType=document.getElementById('as_planType').value;
+  var carrier=document.getElementById('as_carrier').value;
+  var level=document.getElementById('as_level').value;
+  var pType=document.getElementById('as_type').value;
+  var effStart=document.getElementById('as_effStart').value;
+  var effEnd=document.getElementById('as_effEnd').value;
+  var premMin=parseFloat(document.getElementById('as_premMin').value)||0;
+  var premMax=parseFloat(document.getElementById('as_premMax').value)||Infinity;
+  var state=(document.getElementById('as_state').value||'').toUpperCase().trim();
+  var zip=(document.getElementById('as_zip').value||'').trim();
+  var city=(document.getElementById('as_city').value||'').toLowerCase().trim();
+  var county=(document.getElementById('as_county').value||'').toLowerCase().trim();
+  var email=(document.getElementById('as_email').value||'').toLowerCase().trim();
+  var leadSource=document.getElementById('as_leadSource').value;
+  var renewed=document.getElementById('as_renewed').value;
+  var leadStart=document.getElementById('as_leadStart').value;
+  var leadEnd=document.getElementById('as_leadEnd').value;
+  var createStart=document.getElementById('as_createStart').value;
+  var createEnd=document.getElementById('as_createEnd').value;
+  var submittedBy=(document.getElementById('as_submittedBy').value||'').toLowerCase().trim();
+  var ageGroup=document.getElementById('as_ageGroup').value;
+  var medicare=document.getElementById('as_medicare').value;
+  var medicaid=document.getElementById('as_medicaid').value;
+  var medication=(document.getElementById('as_medication').value||'').toLowerCase().trim();
+
+  var results=clients.filter(function(c){
+    if(fn&&!(c.f_firstName||'').toLowerCase().includes(fn))return false;
+    if(ln&&!(c.f_lastName||'').toLowerCase().includes(ln))return false;
+    if(agent&&c.f_agent!==agent)return false;
+    if(gender&&c.f_gender!==gender)return false;
+    if(tobacco&&c.f_tobacco!==tobacco)return false;
+    if(marital&&c.f_marital!==marital)return false;
+    if(planType&&c.f_planType!==planType)return false;
+    if(carrier&&c.f_planCarrier!==carrier)return false;
+    if(level&&c.f_level!==level)return false;
+    if(pType&&c.f_type!==pType)return false;
+    if(state&&(c.f_resSt||'').toUpperCase()!==state)return false;
+    if(zip&&(c.f_resZip||'')!==zip)return false;
+    if(city&&!(c.f_resCity||'').toLowerCase().includes(city))return false;
+    if(county&&!(c.f_resCounty||'').toLowerCase().includes(county))return false;
+    if(email&&!(c.f_email||'').toLowerCase().includes(email))return false;
+    if(leadSource&&c.f_leadSource!==leadSource)return false;
+    if(renewed&&c.f_renewed!==renewed)return false;
+    if(submittedBy&&!(c.f_submittedBy||'').toLowerCase().includes(submittedBy))return false;
+    if(medicare==='yes'&&!c.f_hasMedicare)return false;
+    if(medicare==='no'&&c.f_hasMedicare)return false;
+    if(medicaid==='yes'&&!c.f_hasMedicaid)return false;
+    if(medicaid==='no'&&c.f_hasMedicaid)return false;
+    if(premMin>0||premMax<Infinity){var prem=parseFloat((c.f_premium||'').replace(/[^0-9.]/g,''))||0;if(prem<premMin||prem>premMax)return false;}
+    if(dobStart&&c.f_dob&&c.f_dob<dobStart)return false;
+    if(dobEnd&&c.f_dob&&c.f_dob>dobEnd)return false;
+    if(effStart&&c.f_healthEffective&&c.f_healthEffective<effStart)return false;
+    if(effEnd&&c.f_healthEffective&&c.f_healthEffective>effEnd)return false;
+    if(leadStart&&c.f_leadDate&&c.f_leadDate<leadStart)return false;
+    if(leadEnd&&c.f_leadDate&&c.f_leadDate>leadEnd)return false;
+    if(createStart&&c.f_date&&c.f_date<createStart)return false;
+    if(createEnd&&c.f_date&&c.f_date>createEnd)return false;
+    if(ageGroup){
+      var age=calcClientAge(c);if(age===null)return false;
+      if(ageGroup==='turning65'&&!(age===64||age===65))return false;
+      if(ageGroup==='turning64'&&age!==63&&age!==64)return false;
+      if(ageGroup==='turning26'&&!(age===25||age===26))return false;
+      if(ageGroup==='under18'&&age>=18)return false;
+      if(ageGroup==='18to26'&&(age<18||age>26))return false;
+      if(ageGroup==='26to64'&&(age<26||age>64))return false;
+      if(ageGroup==='over64'&&age<=64)return false;
+    }
+    if(medication){var meds=c.meds||[];var found=meds.some(function(m){return(m.name||'').toLowerCase().includes(medication);});if(!found)return false;}
+    return true;
+  });
+
+  _advSearchResults=results;
+  var tbody=document.getElementById('advSearchBody');tbody.innerHTML='';
+  document.getElementById('advSearchResults').style.display=results.length>0?'block':'none';
+  document.getElementById('advSearchEmpty').style.display=results.length===0?'block':'none';
+  document.getElementById('advSearchCount').textContent=results.length+' client'+(results.length!==1?'s':'')+' found';
+  document.getElementById('advSearchExportBtn').style.display=results.length>0?'inline-block':'none';
+  results.forEach(function(c){
+    var tr=document.createElement('tr');
+    var age=calcClientAge(c);
+    tr.innerHTML='<td><span class="client-name-link" onclick="editClient(\''+c._id+'\')">'+((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()+'</span></td>'+
+      '<td>'+(c.f_dob||'')+'</td><td>'+(age!==null?age:'')+'</td><td>'+(c.f_phone||'')+'</td><td>'+(c.f_email||'')+'</td>'+
+      '<td>'+(c.f_planType||'')+'</td><td>'+(c.f_planCarrier||'')+'</td><td>'+(c.f_premium||'')+'</td>'+
+      '<td>'+(c.f_agent||'')+'</td><td>'+(c.f_resSt||'')+'</td><td>'+(c.f_renewed||'')+'</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+// ===================== SETTINGS EXTRAS =====================
+var _settingsPlanTypes=[];
+var _settingsProjectCodes=[];
+function loadSettingsExtras(){
+  try{_settingsPlanTypes=JSON.parse(localStorage.getItem('crm_plan_types')||'["ACA/Marketplace","Medicare","Medicaid","Short Term","Ancillary"]');}catch(e){_settingsPlanTypes=["ACA/Marketplace","Medicare","Medicaid","Short Term","Ancillary"];}
+  try{_settingsProjectCodes=JSON.parse(localStorage.getItem('crm_project_codes')||'[]');}catch(e){_settingsProjectCodes=[];}
+}
+loadSettingsExtras();
+function populateDefaultAgentSelect(){
+  var sel=document.getElementById('settingsDefaultAgent');if(!sel)return;
+  var cur=localStorage.getItem('crm_default_agent')||_settingsAgents[0]||'';
+  sel.innerHTML='';
+  _settingsAgents.forEach(function(a){var o=document.createElement('option');o.value=a;o.textContent=a;if(a===cur)o.selected=true;sel.appendChild(o);});
+}
+function saveDefaultAgent(){
+  var sel=document.getElementById('settingsDefaultAgent');if(!sel)return;
+  localStorage.setItem('crm_default_agent',sel.value);
+}
+function addPlanTypeSetting(){
+  var v=document.getElementById('newPlanTypeInput').value.trim();if(!v)return;
+  if(_settingsPlanTypes.indexOf(v)!==-1){toast('Already exists.','info');return;}
+  _settingsPlanTypes.push(v);localStorage.setItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));
+  document.getElementById('newPlanTypeInput').value='';renderSettings();
+}
+function removePlanTypeSetting(i){
+  if(!confirm('Remove this plan type?'))return;
+  _settingsPlanTypes.splice(i,1);localStorage.setItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));renderSettings();
+}
+function addProjectCodeSetting(){
+  var v=document.getElementById('newProjectCodeInput').value.trim();if(!v)return;
+  if(_settingsProjectCodes.indexOf(v)!==-1){toast('Already exists.','info');return;}
+  _settingsProjectCodes.push(v);localStorage.setItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));
+  document.getElementById('newProjectCodeInput').value='';renderSettings();
+}
+function removeProjectCodeSetting(i){
+  if(!confirm('Remove this code?'))return;
+  _settingsProjectCodes.splice(i,1);localStorage.setItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
+}
+function exportFullBackup(){
+  if(!clients.length){toast('No clients to export.','error');return;}
+  var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Carrier','Premium','Subsidy','Total Monthly','App Fee','Agent','Lead Source','Renewed','State','City','ZIP','County','Medicare','Medicaid','Notes','App Date']];
+  clients.forEach(function(c){
+    rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_planCarrier||'',c.f_premium||'',c.f_subsidy||'',c.f_totalMonthly||'',c.f_appFee||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'',c.f_resSt||'',c.f_resCity||'',c.f_resZip||'',c.f_resCounty||'',c.f_hasMedicare?'Yes':'No',c.f_hasMedicaid?'Yes':'No',c.f_notes||'',c.f_date||'']);
+  });
+  dlXLSX(rows,'liberty_crm_backup_'+new Date().toISOString().split('T')[0]+'.xlsx');
+}
+function clearPreviewData(){
+  if(!confirm('This will permanently delete all client data saved in Preview Mode. Are you sure?'))return;
+  localStorage.removeItem('crm_preview');
+  clients=[];renderClientTable(clients);renderReportCards();
+  toast('Preview data cleared.','info');
+}
+
+// ===================== DOCUMENT UPLOAD =====================
+var _clientDocs=[];
+function loadClientDocs(clientId){
+  var sec=document.getElementById('clientDocsSection');
+  if(!sec)return;
+  sec.innerHTML='<div class="form-section-title">&#128196; Client Documents</div><p style="font-size:11px;color:#999;">Loading...</p>';
+  fetch(API_BASE+'/documents?clientType=health&clientId='+clientId,{headers:apiHeaders()})
+  .then(function(r){return r.json();})
+  .then(function(docs){_clientDocs=docs||[];renderClientDocs(clientId,docs);})
+  .catch(function(){_clientDocs=[];renderClientDocs(clientId,[]);});
+}
+function renderClientDocs(clientId,docs){
+  var sec=document.getElementById('clientDocsSection');if(!sec)return;
+  sec.innerHTML='<div class="form-section-title">&#128196; Client Documents <span style="font-size:10px;font-weight:normal;color:#999;">(SSN card, driver\'s license, etc.)</span></div>';
+  if(docs&&docs.length){
+    var ul=document.createElement('div');ul.style.cssText='margin-bottom:10px;';
+    docs.forEach(function(d){
+      var row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:12px;';
+      var ext=(d.name||'').split('.').pop().toLowerCase();
+      var icon=(['jpg','jpeg','png','gif','webp'].indexOf(ext)>=0)?'&#128247;':(['pdf'].indexOf(ext)>=0)?'&#128196;':'&#128196;';
+      var kb=d.size?Math.round(d.size/1024)+'KB':'';
+      row.innerHTML=icon+' <a href="'+d.url+'" target="_blank" style="flex:1;color:#1a3a5c;text-decoration:none;word-break:break-all;">'+d.name+'</a>'+
+        '<span style="color:#999;font-size:10px;">'+kb+'</span>'+
+        '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="deleteClientDoc(\''+clientId+'\',\''+encodeURIComponent(d.name)+'\')">✕</button>';
+      ul.appendChild(row);
+    });
+    sec.appendChild(ul);
+  } else {
+    var emp=document.createElement('p');emp.style.cssText='font-size:11px;color:#999;margin-bottom:8px;';emp.textContent='No documents uploaded yet.';sec.appendChild(emp);
+  }
+  var upRow=document.createElement('div');upRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;';
+  upRow.innerHTML='<input type="file" id="docFileInput" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" style="font-size:11px;flex:1;min-width:0;" onchange="uploadClientDoc(\''+clientId+'\')" multiple>'+
+    '<span id="docUploadStatus" style="font-size:11px;color:#666;"></span>';
+  sec.appendChild(upRow);
+}
+function uploadClientDoc(clientId){
+  var input=document.getElementById('docFileInput');
+  if(!input||!input.files||!input.files.length)return;
+  var status=document.getElementById('docUploadStatus');
+  var files=Array.from(input.files);
+  status.textContent='Uploading '+files.length+' file(s)...';
+  var promises=files.map(function(file){
+    var fd=new FormData();
+    fd.append('file',file);
+    fd.append('clientType','health');
+    fd.append('clientId',clientId);
+    return fetch(API_BASE+'/documents',{method:'POST',headers:authUploadHeaders(),body:fd});
+  });
+  var fileNames=files.map(function(f){return f.name;}).join(', ');
+  Promise.all(promises)
+  .then(function(){
+    aiTrack('DocumentUploaded',{clientType:'health',clientId:clientId,files:fileNames});
+    status.textContent='';input.value='';loadClientDocs(clientId);
+  })
+  .catch(function(e){status.textContent='Upload failed: '+e;});
+}
+function deleteClientDoc(clientId,encodedName){
+  if(!confirm('Delete this document?'))return;
+  fetch(API_BASE+'/documents?clientType=health&clientId='+clientId+'&name='+encodedName,{method:'DELETE',headers:apiHeaders()})
+  .then(function(){loadClientDocs(clientId);})
+  .catch(function(e){toast('Delete failed: '+e,'error');});
+}
+
+// initMSAL called below
+var _addrTimer={};
+function addrAC(el,prefix){
+  var v=el.value.trim();
+  var listId=prefix+'AddrList';
+  var list=document.getElementById(listId);
+  if(!list)return;
+  if(v.length<3){list.style.display='none';return;}
+  clearTimeout(_addrTimer[prefix]);
+  _addrTimer[prefix]=setTimeout(function(){
+    fetch('https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&countrycodes=us&q='+encodeURIComponent(v),{headers:{'Accept-Language':'en-US,en'}})
+    .then(function(r){return r.json();})
+    .then(function(results){
+      list.innerHTML='';
+      if(!results||!results.length){list.style.display='none';return;}
+      results.forEach(function(r){
+        var addr=r.address||{};
+        var street=(addr.house_number?addr.house_number+' ':'')+( addr.road||addr.pedestrian||'');
+        var city=addr.city||addr.town||addr.village||addr.hamlet||'';
+        var state=addr.state||'';var zip=addr.postcode||'';
+        if(!street)return;
+        var d=document.createElement('div');
+        d.innerHTML='<div class="addr-main">'+street+'</div><div class="addr-sub">'+city+(state?', '+state:'')+(zip?' '+zip:'')+'</div>';
+        d.addEventListener('mousedown',function(e){
+          e.preventDefault();
+          el.value=street;
+          list.style.display='none';
+          if(zip){
+            var zipEl=document.getElementById('f_'+prefix+'Zip');
+            var cityEl=document.getElementById('f_'+prefix+'City');
+            var stEl=document.getElementById('f_'+prefix+'St');
+            if(zipEl)zipEl.value=zip;
+            if(cityEl)cityEl.value=city;
+            if(stEl)stEl.value=addr.state_code||addr['ISO3166-2-lvl4']||state;
+            if(zip.replace(/\D/g,'').length===5)restoreCounty(zip,prefix,addr.county||'');
+          }
+        });
+        list.appendChild(d);
+      });
+      if(list.children.length>0)list.style.display='block';else list.style.display='none';
+    }).catch(function(){list.style.display='none';});
+  },350);
+}
+
+// ===================== ADVANCED SEARCH (canonical - with create date) =====================
+var _advSearchResults=[];
+function populateAdvSearchCarriers(){
+  var sel=document.getElementById('as_carrier');if(!sel)return;
+  sel.innerHTML='<option value="">All</option>';
+  carriers.forEach(function(c){var o=document.createElement('option');o.value=c.name;o.textContent=c.name;sel.appendChild(o);});
+}
+function calcClientAge(c){
+  if(!c.f_dob)return null;
+  var y=c.f_dob.split(/[-/]/);
+  var yr=y[0].length===4?parseInt(y[0]):parseInt(y[2]);
+  if(isNaN(yr))return null;
+  return new Date().getFullYear()-yr;
+}
+function clearAdvSearch(){
+  ['as_firstName','as_lastName','as_dobStart','as_dobEnd','as_effStart','as_effEnd','as_leadStart','as_leadEnd','as_createStart','as_createEnd','as_premMin','as_premMax','as_state','as_zip','as_city','as_county','as_email','as_medication','as_submittedBy'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+  ['as_agent','as_gender','as_tobacco','as_marital','as_planType','as_carrier','as_level','as_type','as_leadSource','as_renewed','as_ageGroup','as_medicare','as_medicaid'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('advSearchResults').style.display='none';
+  document.getElementById('advSearchEmpty').style.display='none';
+  document.getElementById('advSearchExportBtn').style.display='none';
+  _advSearchResults=[];
+}
+function exportAdvSearchExcel(){
+  if(!_advSearchResults.length)return;
+  var rows=[['Name','DOB','Age','Phone','Email','Plan Type','Carrier','Premium','Agent','State','County','ZIP','Renewed','Lead Source','App Date']];
+  _advSearchResults.forEach(function(c){
+    var age=calcClientAge(c);
+    rows.push([(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_dob||'',age||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planCarrier||'',c.f_premium||'',c.f_agent||'',c.f_resSt||'',c.f_resCounty||'',c.f_resZip||'',c.f_renewed||'',c.f_leadSource||'',c.f_date||'']);
+  });
+  dlXLSX(rows,'advanced_search_results.xlsx');
+}
+
+// ===================== TO-DO LIST =====================
+var _todos=[];
+var _todoFilter='all';
+function loadTodos(){try{_todos=JSON.parse(localStorage.getItem('crm_todos')||'[]');}catch(e){_todos=[];}}
+function saveTodos(){localStorage.setItem('crm_todos',JSON.stringify(_todos));}
+loadTodos();
+function openAddTodo(){
+  var s=document.getElementById('todoAddSection');
+  s.style.display='block';
+  document.getElementById('todoTaskInput').focus();
+  document.getElementById('todoTaskInput').value='';
+  document.getElementById('todoDueInput').value='';
+  document.getElementById('todoPriorityInput').value='normal';
+  document.getElementById('todoClientInput').value='';
+  document.getElementById('todoClientId').value='';
+}
+function toggleTodo(id){
+  var t=_todos.find(function(x){return x.id===id;});
+  if(t)t.done=!t.done;
+  saveTodos();renderTodos();
+}
+function deleteTodo(id){
+  if(!confirm('Delete this task?'))return;
+  _todos=_todos.filter(function(x){return x.id!==id;});
+  saveTodos();renderTodos();
+}
+function clearCompletedTodos(){
+  var done=_todos.filter(function(x){return x.done;}).length;
+  if(!done){alert('No completed tasks to clear.');return;}
+  if(!confirm('Remove '+done+' completed task'+(done!==1?'s':'')+' ?'))return;
+  _todos=_todos.filter(function(x){return !x.done;});
+  saveTodos();renderTodos();
+}
+function setTodoFilter(f){
+  _todoFilter=f;
+  ['All','Pending','High','Done'].forEach(function(n){var btn=document.getElementById('todoFilter'+n);if(btn)btn.style.cssText='font-size:11px;padding:4px 10px;';});
+  var active=document.getElementById('todoFilter'+f.charAt(0).toUpperCase()+f.slice(1));
+  if(active)active.style.cssText='font-size:11px;padding:4px 10px;background:#1a3a5c;color:#fff;border-color:#1a3a5c;';
+  renderTodos();
+}
+function renderTodos(){
+  var container=document.getElementById('todoListContainer');if(!container)return;
+  var filtered=_todos.filter(function(t){
+    if(_todoFilter==='pending')return !t.done;
+    if(_todoFilter==='high')return t.priority==='high'&&!t.done;
+    if(_todoFilter==='done')return t.done;
+    return true;
+  });
+  var today=new Date().toISOString().split('T')[0];
+  document.getElementById('todoEmpty').style.display=filtered.length===0?'block':'none';
+  container.innerHTML='';
+  filtered.forEach(function(t){
+    var overdue=t.due&&t.due<today&&!t.done;
+    var dueSoon=t.due&&t.due===today&&!t.done;
+    var div=document.createElement('div');
+    div.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f0f0f0;'+(t.done?'opacity:0.55;':'');
+    var prioColor=t.priority==='high'?'#dc3545':t.priority==='low'?'#6c757d':'#1a3a5c';
+    var prioLabel=t.priority==='high'?'🔴 High':t.priority==='low'?'🔵 Low':'⚪ Normal';
+    var dueStr='';
+    if(t.due){
+      if(overdue)dueStr='<span style="color:#dc3545;font-size:10px;font-weight:bold;margin-left:6px;">⚠ Overdue: '+t.due+'</span>';
+      else if(dueSoon)dueStr='<span style="color:#e67e22;font-size:10px;font-weight:bold;margin-left:6px;">⏰ Due Today</span>';
+      else dueStr='<span style="color:#666;font-size:10px;margin-left:6px;">Due: '+t.due+'</span>';
+    }
+    var clientLink='';
+    if(t.clientId&&t.clientName){
+      clientLink='<span onclick="editClient(\''+t.clientId+'\')" style="font-size:10px;background:#dbeafe;color:#1a3a5c;padding:2px 8px;border-radius:10px;cursor:pointer;margin-left:6px;font-weight:600;" title="Open client record">&#128101; '+t.clientName+'</span>';
+    }
+    div.innerHTML=
+      '<input type="checkbox" '+(t.done?'checked':'')+' style="width:16px;height:16px;cursor:pointer;flex-shrink:0;" onchange="toggleTodo('+t.id+')">'+
+      '<div style="flex:1;">'+
+        '<span style="font-size:13px;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+(t.task)+'</span>'+dueStr+clientLink+
+      '</div>'+
+      '<span style="font-size:10px;color:'+prioColor+';font-weight:600;white-space:nowrap;">'+prioLabel+'</span>'+
+      '<button class="btn btn-red" style="padding:2px 7px;font-size:11px;" onclick="deleteTodo('+t.id+')">✕</button>';
+    container.appendChild(div);
+  });
+}
+
+// Show client tasks on client form (called after setFormData)
+function renderClientTodos(clientId){
+  var existing=document.getElementById('clientTodoSection');
+  if(existing)existing.remove();
+  if(!clientId)return;
+  var tasks=_todos.filter(function(t){return String(t.clientId)===String(clientId);});
+  var formCard=document.querySelector('#viewForm .form-card');
+  if(!formCard)return;
+  var sec=document.createElement('div');sec.className='form-section';sec.id='clientTodoSection';
+  var pendingCount=tasks.filter(function(t){return !t.done;}).length;
+  sec.innerHTML='<div class="form-section-title">&#9989; Tasks for this Client <span style="font-weight:normal;color:#999;">('+tasks.length+' total, '+pendingCount+' pending)</span></div>';
+  if(!tasks.length){
+    sec.innerHTML+='<p style="font-size:11px;color:#999;">No tasks linked to this client. <span style="color:#1a3a5c;cursor:pointer;text-decoration:underline;" onclick="openAddTodoForClient(\''+clientId+'\')">Add one</span></p>';
+  } else {
+    var ul=document.createElement('div');
+    tasks.forEach(function(t){
+      var today=new Date().toISOString().split('T')[0];
+      var overdue=t.due&&t.due<today&&!t.done;
+      var row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:12px;';
+      row.innerHTML='<input type="checkbox" '+(t.done?'checked':'')+' onchange="toggleTodo('+t.id+');renderClientTodos(\''+clientId+'\')" style="cursor:pointer;">'+
+        '<span style="flex:1;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+(t.task)+'</span>'+
+        (t.due?'<span style="font-size:10px;color:'+(overdue?'#dc3545':'#666')+';">'+t.due+'</span>':'')+
+        (t.priority==='high'?'<span style="font-size:10px;color:#dc3545;font-weight:bold;">High</span>':'')+
+        '<button class="btn btn-red" style="padding:1px 5px;font-size:10px;" onclick="deleteTodo('+t.id+');renderClientTodos(\''+clientId+'\')">✕</button>';
+      ul.appendChild(row);
+    });
+    sec.appendChild(ul);
+    var addBtn=document.createElement('button');
+    addBtn.className='btn add-row-btn';addBtn.style.marginTop='8px';
+    addBtn.textContent='+ Add Task';
+    addBtn.onclick=function(){openAddTodoForClient(clientId);};
+    sec.appendChild(addBtn);
+  }
+  // Insert before the Notes section (last form-section before form-actions)
+  var actions=formCard.querySelector('.form-actions');
+  formCard.insertBefore(sec,actions);
+}
+function openAddTodoForClient(clientId){
+  var c=clients.find(function(x){return String(x._id)===String(clientId);});
+  var name=c?((c.f_firstName||'')+' '+(c.f_lastName||'')).trim():'';
+  showView('todo');
+  openAddTodo();
+  document.getElementById('todoClientId').value=clientId;
+  document.getElementById('todoClientInput').value=name;
+}
+
+// ===================== SETTINGS =====================
+var _settingsAgents=[];
+var _settingsLeadSources=[];
+var _settingsRenewals=[];
+function loadSettings(){
+  try{_settingsAgents=JSON.parse(localStorage.getItem('crm_agents')||'["Thomas Jaboro","Paul Jaboro Jr."]');}catch(e){_settingsAgents=["Thomas Jaboro","Paul Jaboro Jr."];}
+  try{_settingsLeadSources=JSON.parse(localStorage.getItem('crm_lead_sources')||'["Insurance Quotes","Datalot","Smart Financial","Referral","Other"]');}catch(e){_settingsLeadSources=["Insurance Quotes","Datalot","Smart Financial","Referral","Other"];}
+  try{_settingsRenewals=JSON.parse(localStorage.getItem('crm_renewals')||'["2026 Renewed","Not Renewed"]');}catch(e){_settingsRenewals=["2026 Renewed","Not Renewed"];}
+}
+function saveSettings(){
+  localStorage.setItem('crm_agents',JSON.stringify(_settingsAgents));
+  localStorage.setItem('crm_lead_sources',JSON.stringify(_settingsLeadSources));
+  localStorage.setItem('crm_renewals',JSON.stringify(_settingsRenewals));
+  applySettingsToDropdowns();
+}
+loadSettings();
+function applySettingsToDropdowns(){
+  function repopSel(id,items,blank){var sel=document.getElementById(id);if(!sel)return;var cur=sel.value;sel.innerHTML=blank||'';items.forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;sel.appendChild(o);});sel.value=cur;}
+  repopSel('f_agent',_settingsAgents,'');
+  repopSel('rpt_filterAgent',_settingsAgents,'<option value="">All</option>');
+  repopSel('f_leadSource',_settingsLeadSources,'<option value=""></option>');
+  repopSel('rpt_filterLeadSource',_settingsLeadSources,'<option value="">All</option>');
+  repopSel('as_leadSource',_settingsLeadSources,'<option value="">All</option>');
+  repopSel('f_renewed',_settingsRenewals,'<option value=""></option>');
+  repopSel('rpt_filterRenewed',_settingsRenewals,'<option value="">All</option>');
+  repopSel('as_renewed',_settingsRenewals,'<option value="">All</option>');
+  repopSel('filterAgent',_settingsAgents,'<option value="">All Agents</option>');
+  repopSel('filterLeadSource',_settingsLeadSources,'<option value="">All Lead Sources</option>');
+  repopSel('filterRenewed',_settingsRenewals,'<option value="">All Renewal Status</option>');
+}
+function renderSettingsList(arr,containerId,removeFunc){
+  var el=document.getElementById(containerId);if(!el)return;
+  el.innerHTML='';
+  if(!arr.length){el.innerHTML='<p style="font-size:11px;color:#999;margin-bottom:6px;">None added yet.</p>';return;}
+  arr.forEach(function(item,i){
+    var div=document.createElement('div');
+    div.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f0;';
+    div.innerHTML='<span style="flex:1;font-size:12px;">'+item+'</span>'+
+      '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="'+removeFunc+'('+i+')">Remove</button>';
+    el.appendChild(div);
+  });
+}
+function renderSettings(){
+  renderSettingsList(_settingsAgents,'agentSettingsList','removeAgentSetting');
+  renderSettingsList(_settingsLeadSources,'leadSourceSettingsList','removeLeadSourceSetting');
+  renderSettingsList(_customMeds,'customMedSettingsList','removeCustomMedSetting');
+  renderSettingsList(_settingsRenewals,'renewalSettingsList','removeRenewalSetting');
+  renderSettingsList(_settingsPlanTypes,'planTypeSettingsList','removePlanTypeSetting');
+  renderSettingsList(_settingsProjectCodes,'projectCodeSettingsList','removeProjectCodeSetting');
+  var nameEl=document.getElementById('settingsCrmName');
+  if(nameEl)nameEl.value=localStorage.getItem('crm_display_name')||'Liberty Bell Health';
+}
+function addAgentSetting(){var v=document.getElementById('newAgentInput').value.trim();if(!v)return;if(_settingsAgents.indexOf(v)!==-1){toast('Agent already exists.','info');return;}_settingsAgents.push(v);document.getElementById('newAgentInput').value='';saveSettings();renderSettings();populateDefaultAgentSelect();}
+function removeAgentSetting(i){if(!confirm('Remove this agent?'))return;_settingsAgents.splice(i,1);saveSettings();renderSettings();populateDefaultAgentSelect();}
+function addLeadSourceSetting(){var v=document.getElementById('newLeadSourceInput').value.trim();if(!v)return;if(_settingsLeadSources.indexOf(v)!==-1){toast('Lead source already exists.','info');return;}_settingsLeadSources.push(v);document.getElementById('newLeadSourceInput').value='';saveSettings();renderSettings();}
+function removeLeadSourceSetting(i){if(!confirm('Remove this lead source?'))return;_settingsLeadSources.splice(i,1);saveSettings();renderSettings();}
+function addCustomMedSetting(){var v=document.getElementById('newCustomMedInput').value.trim();if(!v)return;saveCustomMed(v);document.getElementById('newCustomMedInput').value='';renderSettings();}
+function removeCustomMedSetting(i){if(!confirm('Remove this medication?'))return;_customMeds.splice(i,1);localStorage.setItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();}
+function addRenewalSetting(){var v=document.getElementById('newRenewalInput').value.trim();if(!v)return;if(_settingsRenewals.indexOf(v)!==-1){toast('Already exists.','info');return;}_settingsRenewals.push(v);document.getElementById('newRenewalInput').value='';saveSettings();renderSettings();}
+function removeRenewalSetting(i){if(!confirm('Remove this renewal option?'))return;_settingsRenewals.splice(i,1);saveSettings();renderSettings();}
+function saveCrmName(){var v=document.getElementById('settingsCrmName').value.trim();if(!v)return;localStorage.setItem('crm_display_name',v);document.querySelector('.sidebar .logo').childNodes[0].textContent=v;toast('CRM name updated!','success');}
+
+try{initMSAL();loadCarriers();loadSettingsExtras();applySettingsToDropdowns();}catch(e){console.log('MSAL error:',e);showAuthScreen();}
