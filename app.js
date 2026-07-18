@@ -1130,27 +1130,41 @@ function formatCardExp(el){
 }
 /* Detect card brand from first digit; only auto-select if Card Type is still blank
    so a manual override sticks. 3→Amex, 4→Visa, 5→Mastercard, 6→Discover. */
+/* Auto-fill helper: only overwrite an existing value if we set it ourselves
+   (tracked via data-autofilled). If the user manually typed/changed it, leave
+   it alone. Called whenever the source field changes. */
+function _isSafeToAutofill(el){return el&&(!el.value||el.dataset.autofilled==='1');}
+function _setAutofilled(el,value){if(!el)return;el.value=value;el.dataset.autofilled='1';markFormDirty();}
+/* When the user manually edits an auto-filled field, drop the autofilled flag
+   so future auto-fills won't overwrite their edit. */
+document.addEventListener('input',function(e){var t=e.target;if(t&&t.dataset&&t.dataset.autofilled==='1'&&t.id!=='f_routing'&&t.id!=='f_cardNumber')delete t.dataset.autofilled;});
+document.addEventListener('change',function(e){var t=e.target;if(t&&t.dataset&&t.dataset.autofilled==='1'&&t.id!=='f_routing'&&t.id!=='f_cardNumber')delete t.dataset.autofilled;});
+
 function autoDetectCardType(el){
   var first=(el.value||'').replace(/\D/g,'').charAt(0);
   var brand={'3':'Amex','4':'Visa','5':'Mastercard','6':'Discover'}[first];
-  if(!brand)return;
   var sel=document.getElementById('f_cardType');
-  if(sel&&!sel.value)sel.value=brand;
+  if(!sel)return;
+  // No first digit yet? Clear our previous auto-fill so the field goes empty again.
+  if(!first){if(sel.dataset.autofilled==='1'){sel.value='';delete sel.dataset.autofilled;}return;}
+  if(!brand)return;
+  if(_isSafeToAutofill(sel))_setAutofilled(sel,brand);
 }
 /* ROUTING_LOOKUP is loaded from routing-lookup.js — full FedACH directory
    (18k+ US banks) generated from Moov's open-source github.com/moov-io/fed
    dataset which mirrors the Federal Reserve FedACH Participants Directory. */
-/* Look up bank name from ABA routing number. Only populates if empty so a manual
-   entry isn't overwritten. If not in the local table, does nothing silently. */
+/* Look up bank name from ABA routing number. Overwrites a previously auto-filled
+   bank name when the routing changes, but leaves manually-typed names alone. */
 function lookupBankFromRouting(rn){
   var digits=(rn||'').replace(/\D/g,'');
-  if(digits.length!==9)return;
   var bankInput=document.getElementById('f_bankName');
-  if(!bankInput||bankInput.value.trim())return;
-  var name=ROUTING_LOOKUP[digits];
-  if(name){
-    bankInput.value=name;
-    markFormDirty();
+  if(!bankInput)return;
+  // Routing cleared or partial → clear our previous auto-fill (if the user
+  // hadn't manually replaced it).
+  if(digits.length<9){if(bankInput.dataset.autofilled==='1'){bankInput.value='';delete bankInput.dataset.autofilled;}return;}
+  var name=ROUTING_LOOKUP[digits];if(!name)return;
+  if(_isSafeToAutofill(bankInput)){
+    _setAutofilled(bankInput,name);
     toast('Bank identified: '+name,'success');
   }
 }
