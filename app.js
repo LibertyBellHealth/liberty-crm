@@ -280,8 +280,8 @@ function parseDiscoveryText(text){
   var section='primary'; // primary | spouse | child1 | child2 | child3 | child4
   var data={};        // top-level primary values (f_firstName etc.)
   var members={};      // section -> {firstName,mi,lastName,relation,...}
-  var meds=[]; // still parsed if Rx line supplied
-  var doctors=[]; // still parsed if Primary Dr / Specialist / Hospital supplied
+  var meds=[]; // parsed from Rx: (single-line or multi-line)
+  var doctors=[]; // parsed from Primary Dr / Specialist / Dr Visits lines
   var notesExtras=[];
 
   function setPrimary(field,val){data['f_'+field]=val;}
@@ -289,21 +289,58 @@ function parseDiscoveryText(text){
     if(!members[sec])members[sec]={relation:rel};
     members[sec][field]=val;
   }
+  function addMed(str){var s=(str||'').trim();if(!s)return;var p=parseMedLine(s);if(p&&(p.name||p.mg))meds.push(p);}
+  function addDoc(name,specialty){var n=(name||'').trim();if(!n)return;doctors.push({name:n,specialty:specialty||''});}
+
+  // Multi-line collector: after a label like "Rx-" (empty value), subsequent
+  // unlabeled non-blank lines belong to that field until the next label.
+  var collecting=null; // 'rx' | 'primary_dr' | 'specialist' | null
 
   for(var i=0;i<lines.length;i++){
     var raw=lines[i]; var line=raw.trim();
-    if(!line)continue;
+    if(!line){collecting=null;continue;} // blank line ends multi-line mode
     // Section headers first (bare labels, not "field-value" lines)
-    if(/^spouse\s*[-:]?\s*$/i.test(line)){section='spouse';continue;}
+    if(/^spouse\s*[-:]?\s*$/i.test(line)){section='spouse';collecting=null;continue;}
     var childMatch=line.match(/^child\s*(\d)\s*[-:]?\s*$/i);
-    if(childMatch){section='child'+childMatch[1];continue;}
+    if(childMatch){section='child'+childMatch[1];collecting=null;continue;}
     // Parse "Label- value" or "Label: value"
     var m=line.match(/^([^\-:]+?)\s*[-:]\s*(.*)$/);
-    if(!m)continue;
+    if(!m){
+      // Unlabeled continuation of a multi-line field
+      if(collecting==='rx')addMed(line);
+      else if(collecting==='primary_dr')addDoc(line,'Primary');
+      else if(collecting==='specialist')addDoc(line,'Specialist');
+      continue;
+    }
     var label=m[1].trim().toLowerCase(),val=m[2].trim();
-    if(!val)continue; // skip blanks
 
-    // Primary-only fields
+    // Multi-line trigger labels — accept either same-line values OR set collecting mode for following lines
+    if(label==='rx'||label==='medications'){
+      collecting='rx';
+      if(val){val.split(/[,;\n]/).forEach(function(ln){addMed(ln);});}
+      continue;
+    }
+    if(label==='primary dr'||label==='primary doctor'){
+      collecting='primary_dr';
+      if(val)addDoc(val,'Primary');
+      continue;
+    }
+    if(label==='specialist'){
+      collecting='specialist';
+      if(val)addDoc(val,'Specialist');
+      continue;
+    }
+    if(label==='dr visits'){
+      // Just informational; drop into notes if there's a value
+      collecting=null;
+      if(val)notesExtras.push('Dr Visits: '+val);
+      continue;
+    }
+    // Any other label line resets the multi-line collector
+    collecting=null;
+    if(!val)continue; // skip blanks after non-multi-line labels
+
+    // Primary-only single-value fields
     if(section==='primary'){
       if(label==='lead source'){setPrimary('leadSource',val);continue;}
       if(label==='phone number'||label==='phone'){setPrimary('phone',formatPhoneStr(val));continue;}
@@ -320,13 +357,6 @@ function parseDiscoveryText(text){
       if(label==='zip'){setPrimary('resZip',val.replace(/\D/g,'').slice(0,5));continue;}
       if(label==='county'){setPrimary('resCounty',val);continue;}
       if(label==='household income'){setPrimary('primaryIncome',val.replace(/[^\d.]/g,''));continue;}
-      if(label==='primary dr'||label==='primary doctor'){doctors.push({name:val,specialty:'Primary'});continue;}
-      if(label==='specialist'){doctors.push({name:val,specialty:'Specialist'});continue;}
-      if(label==='rx'||label==='medications'){
-        // Split rx by comma or semicolon; use existing meds parser per entry
-        val.split(/[,;]/).forEach(function(m){var parsed=parseMedLine(m.trim());if(parsed&&(parsed.name||parsed.mg))meds.push(parsed);});
-        continue;
-      }
     }
 
     // Shared "person" fields — always apply to whichever section we're in
