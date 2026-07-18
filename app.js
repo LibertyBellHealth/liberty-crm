@@ -51,11 +51,19 @@ function aiTrack(name, props) {
   } catch (e) { /* silent */ }
 }
 
-/* HIPAA-oriented session inactivity: warn at 13 min, sign out at 15 min.
-   Any input event resets the timers so active use keeps the session alive. */
+/* HIPAA-oriented session inactivity: warn at 43 min, sign out at 45 min.
+
+   Only GENUINE interaction counts. mousemove and scroll used to reset this, which
+   meant any cursor drift — or a trackpad nudge, or an animated element scrolling —
+   kept an unattended session alive indefinitely, defeating the point. click /
+   keydown / touchstart require a person.
+
+   The timers are armed from refreshApiToken().then(...), NOT at sign-in: this
+   function no-ops while _apiToken is null, and at sign-in time the token has not
+   resolved yet, so arming it there silently did nothing. */
 var _sessionTimer=null, _sessionWarnTimer=null;
-var SESSION_TIMEOUT_MS = 15 * 60 * 1000;
-var SESSION_WARN_MS    = 13 * 60 * 1000;
+var SESSION_TIMEOUT_MS = 45 * 60 * 1000;
+var SESSION_WARN_MS    = 43 * 60 * 1000;
 function resetSessionTimer(){
   clearTimeout(_sessionTimer);clearTimeout(_sessionWarnTimer);
   if(!_apiToken)return; // only enforce once signed in
@@ -68,7 +76,7 @@ function resetSessionTimer(){
     signOut();
   },SESSION_TIMEOUT_MS);
 }
-['click','keydown','mousemove','touchstart','scroll'].forEach(function(ev){
+['click','keydown','touchstart'].forEach(function(ev){
   document.addEventListener(ev,resetSessionTimer,{passive:true,capture:true});
 });
 
@@ -138,8 +146,7 @@ function onSignedIn(account){
   // Tag every subsequent App Insights event with this user so we can correlate
   // errors / usage to a specific person when debugging.
   try{window._aiUser=email;if(window.appInsights&&window.appInsights.setAuthenticatedUserContext)window.appInsights.setAuthenticatedUserContext(email);}catch(e){}
-  resetSessionTimer();
-  refreshApiToken().then(function(){ loadClients(); routeFromHash(); });
+  refreshApiToken().then(function(){ resetSessionTimer(); loadClients(); routeFromHash(); });
 }
 /* Hash-based deep links so URLs like /#/client/<id> open that client directly.
    Enables bookmarking and sharing a link to a specific record. */
@@ -164,7 +171,7 @@ function signIn(){msalInstance.loginRedirect({scopes:['openid','profile'],redire
 function signOut(){
   aiTrack('UserSignOut',{});
   clearCRMStorage();
-  clearTimeout(_sessionTimer);
+  clearTimeout(_sessionTimer);clearTimeout(_sessionWarnTimer);
   _apiToken=null;
   msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});
 }
