@@ -991,29 +991,41 @@ function fmtMoneyBlur(el){
   if(!isNaN(v))el.value='$'+v.toFixed(2);
   else el.value='';
 }
-/* Phone extension — kept out of the way until needed. The Ext box is hidden by
-   default; "+ Ext" reveals it, and it auto-reveals for clients that already have
-   one so an existing extension is never invisible. Stored in its own column
+/* Phone extension — always collapsed on load; only shown when the user clicks.
+   The toggle itself surfaces the stored value ("Ext 4021") so a saved extension
+   is still discoverable while the input stays hidden. Stored in its own column
    (phone_ext / alt_phone_ext) rather than packed into the phone string, which
    would break formatPhone(), the tel: links and phone search. */
+function extLabel(w){
+  var inp=document.getElementById('f_'+w+'Ext');
+  var btn=document.getElementById('extToggle_'+w);
+  if(!btn)return;
+  var v=(inp&&inp.value||'').trim();
+  var open=inp&&inp.style.display!=='none';
+  btn.textContent=open?'Ext':(v?'Ext '+v:'+ Ext');
+  btn.classList.toggle('active',!!v||open);
+}
 function toggleExt(which){
   var inp=document.getElementById('f_'+which+'Ext');
-  var btn=document.getElementById('extToggle_'+which);
   if(!inp)return;
   var showing=inp.style.display!=='none';
-  if(showing&&(inp.value||'').trim()){inp.focus();return;} // don't hide a filled ext
-  inp.style.display=showing?'none':'';
-  if(btn){btn.textContent=showing?'+ Ext':'Ext';btn.classList.toggle('active',!showing);}
+  inp.style.display=showing?'none':'';   // collapses even when it holds a value
+  extLabel(which);
   if(!showing)inp.focus();
 }
+/* Called after the form is populated or cleared: keep both Ext inputs hidden
+   regardless of content, and refresh the toggle labels. */
+document.addEventListener('input',function(e){
+  if(!e.target||!e.target.id)return;
+  if(e.target.id==='f_phoneExt')extLabel('phone');
+  else if(e.target.id==='f_altPhoneExt')extLabel('altPhone');
+});
 function syncExtVisibility(){
   ['phone','altPhone'].forEach(function(w){
     var inp=document.getElementById('f_'+w+'Ext');
-    var btn=document.getElementById('extToggle_'+w);
     if(!inp)return;
-    var has=!!(inp.value||'').trim();
-    inp.style.display=has?'':'none';
-    if(btn){btn.textContent=has?'Ext':'+ Ext';btn.classList.toggle('active',has);}
+    inp.style.display='none';
+    extLabel(w);
   });
 }
 function formatPhone(el){var v=el.value.replace(/\D/g,'');if(v.length>=10)el.value='('+v.substr(0,3)+') '+v.substr(3,3)+'-'+v.substr(6,4);}
