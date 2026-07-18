@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718e">
+<link rel="stylesheet" href="styles.css?v=20260718f">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -320,11 +320,9 @@
           <!-- 7. PAYMENT INFORMATION -->
           <div class="form-section">
             <div class="form-section-title">Payment Information</div>
-            <div class="fg g3" style="margin-bottom:8px;">
-              <div class="field" style="grid-column:span 2;"><label>Name of Financial Institution</label><input id="f_bankName"></div>
+            <div class="fg" style="grid-template-columns:1.8fr 0.9fr 1fr 1fr 1.3fr;gap:8px;margin-bottom:8px;">
+              <div class="field"><label>Name of Financial Institution</label><input id="f_bankName"></div>
               <div class="field"><label>Account Type</label><select id="f_accountType"><option></option><option>Checking</option><option>Savings</option></select></div>
-            </div>
-            <div class="fg g3" style="margin-bottom:8px;">
               <div class="field"><label>Routing Number</label>
                 <div class="reveal-wrap"><input id="f_routing" type="password" placeholder="9-digit routing #" maxlength="9" oninput="if(this.value.replace(/\D/g,'').length===9)lookupBankFromRouting(this.value)" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_routing',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
               </div>
@@ -333,7 +331,7 @@
               </div>
               <div class="field"><label>Primary Name on Account</label><input id="f_accountName"></div>
             </div>
-            <div class="fg g4">
+            <div class="fg" style="grid-template-columns:0.8fr 1.6fr 0.6fr 0.5fr;gap:8px;">
               <div class="field"><label>Card Type</label><select id="f_cardType"><option></option><option>Visa</option><option>Mastercard</option><option>Amex</option><option>Discover</option></select></div>
               <div class="field"><label>Card Number</label>
                 <div class="reveal-wrap"><input id="f_cardNumber" type="password" placeholder="1234 5678 9012 3456" maxlength="19" oninput="formatCardNumber(this);autoDetectCardType(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cardNumber',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
@@ -342,7 +340,7 @@
                 <div class="reveal-wrap"><input id="f_cardExp" type="password" placeholder="MM/YY" maxlength="5" oninput="formatCardExp(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cardExp',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
               </div>
               <div class="field"><label>CVV#</label>
-                <div class="reveal-wrap"><input id="f_cvv" type="password" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cvv',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+                <div class="reveal-wrap"><input id="f_cvv" type="password" maxlength="4" onfocus="focusReveal(this)" onblur="blurReveal(this)"><button class="icon-btn" onclick="copyField('f_cvv',this)" title="Copy" type="button"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
               </div>
             </div>
           </div>
@@ -857,8 +855,8 @@
   </div>
 </div>
 
-<script src="routing-lookup.js?v=20260718e"></script>
-<script src="app.js?v=20260718e"></script>
+<script src="routing-lookup.js?v=20260718f"></script>
+<script src="app.js?v=20260718f"></script>
 
 </body>
 </html>
