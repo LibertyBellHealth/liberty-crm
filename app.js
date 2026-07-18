@@ -260,12 +260,7 @@ function _doShowView(v){
   if(vid)document.querySelector('.main').scrollTop=0;
   if(v==='clients')maybeRevalidateClients();
   if(v==='carriers'){
-    // Auto-seed on the first ever visit to the Carriers page if the list is empty
-    // and the bundled master list is loaded. One-time; user can still delete anything.
-    if((!carriers||!carriers.length)&&typeof CARRIER_SEED!=='undefined'&&!localStorage.getItem('crm_carriers_seeded')){
-      seedCarriersFromMaster();
-      localStorage.setItem('crm_carriers_seeded','1');
-    }
+    maybeAutoSeedCarriers();
     renderCarriers();
   }
   if(v==='form_edit'||v==='new')setTimeout(wireCopyableFields,50);
@@ -1358,6 +1353,41 @@ function addCarrier(){
    carriers with state × product-type availability parsed from user's insurance
    list). Merges: existing carriers with the same name get availability extended
    without duplicates; new carriers are appended. Never overwrites contact info. */
+/* Called every time the Carriers view opens. Bumps the seed version silently:
+   - First-ever visit (empty list): auto-seed with the master list, mark v2.
+   - Old seed detected (v1 flag, no v2): prompt to refresh so spelling
+     duplicates like 'BCBS IL' vs 'Blue Cross Blue Shield of Illinois' merge.
+     Preserves carriers with manually-entered contact info. */
+var CARRIER_SEED_VERSION='v2';
+function maybeAutoSeedCarriers(){
+  if(typeof CARRIER_SEED==='undefined')return;
+  var currentFlag=localStorage.getItem('crm_carriers_seed_version');
+  if(currentFlag===CARRIER_SEED_VERSION)return;
+  var hasOldSeed=!!localStorage.getItem('crm_carriers_seeded');
+  var isEmpty=!carriers||!carriers.length;
+  if(isEmpty){
+    seedCarriersFromMaster();
+    localStorage.setItem('crm_carriers_seed_version',CARRIER_SEED_VERSION);
+    return;
+  }
+  if(hasOldSeed){
+    // User was seeded with the old duplicate-heavy list. Offer to clean it up.
+    showConfirm('The carrier master list was updated to merge spelling duplicates (like "BCBS IL" and "Blue Cross Blue Shield of Illinois"). Refresh now? Any carriers where you already entered a Contact / Phone / Email will be kept.',function(){
+      carriers=carriers.filter(function(c){
+        return (c.contact||'').trim()||(c.phone||'').trim()||(c.email||'').trim();
+      });
+      saveCarriers();
+      seedCarriersFromMaster();
+      localStorage.setItem('crm_carriers_seed_version',CARRIER_SEED_VERSION);
+    },{title:'Refresh Master Carrier List',okText:'Refresh',danger:false,onCancel:function(){
+      // User declined — set the flag so they aren't prompted every visit
+      localStorage.setItem('crm_carriers_seed_version',CARRIER_SEED_VERSION);
+    }});
+  } else {
+    // User has custom carriers but never seeded — leave alone, mark flag
+    localStorage.setItem('crm_carriers_seed_version',CARRIER_SEED_VERSION);
+  }
+}
 function seedCarriersFromMaster(){
   if(typeof CARRIER_SEED==='undefined'){toast('Master list not loaded','error');return;}
   var byName={};
