@@ -268,3 +268,11 @@ body{font-family:Arial,sans-serif;font-size:14px;background:#f4f6f9;color:#222;}
 .primary-label{font-size:11px;font-weight:bold;color:#1a3a5c;margin-bottom:6px;padding:5px 8px;background:#e8f0f7;border-radius:4px;display:block;}
 .homecare-link{display:inline-block;padding:3px 8px;background:#e8f0f7;border:1px solid #1a3a5c;border-radius:4px;color:#1a3a5c;font-size:11px;font-weight:600;cursor:pointer;text-decoration:none;}
 .homecare-link:hover{background:#1a3a5c;color:#fff;}
+
+/* Phone extension — hidden until "+ Ext" is clicked, or auto-shown if the client has one */
+.phone-row{display:flex;gap:6px;align-items:center;}
+.phone-row input:first-child{flex:1;min-width:0;}
+.ext-input{width:70px;flex-shrink:0;}
+.ext-toggle{background:none;border:none;padding:0 0 0 6px;font-family:Arial,sans-serif;font-size:10px;color:var(--text-muted);cursor:pointer;text-transform:none;letter-spacing:0;}
+.ext-toggle:hover{color:var(--accent);text-decoration:underline;}
+.ext-toggle.active{color:var(--accent);}

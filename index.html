@@ -328,8 +328,8 @@
             <div class="fg g4">
               <div class="field"><label>State</label><input id="f_resSt"></div>
               <div class="field"><label>County</label><select id="f_resCounty"><option value=""></option></select></div>
-              <div class="field"><label>Phone #</label><input id="f_phone" placeholder="(XXX) XXX-XXXX" oninput="formatPhone(this)"></div>
-              <div class="field"><label>Alt Phone #</label><input id="f_altPhone" placeholder="(XXX) XXX-XXXX" oninput="formatPhone(this)"></div>
+              <div class="field"><label>Phone # <button type="button" class="ext-toggle" id="extToggle_phone" onclick="toggleExt('phone')">+ Ext</button></label><div class="phone-row"><input id="f_phone" placeholder="(XXX) XXX-XXXX" oninput="formatPhone(this)"><input id="f_phoneExt" class="ext-input" placeholder="Ext" maxlength="8" autocomplete="off" style="display:none;"></div></div>
+              <div class="field"><label>Alt Phone # <button type="button" class="ext-toggle" id="extToggle_altPhone" onclick="toggleExt('altPhone')">+ Ext</button></label><div class="phone-row"><input id="f_altPhone" placeholder="(XXX) XXX-XXXX" oninput="formatPhone(this)"><input id="f_altPhoneExt" class="ext-input" placeholder="Ext" maxlength="8" autocomplete="off" style="display:none;"></div></div>
             </div>
             <div class="fg g2" style="margin-top:8px;">
               <div class="field autocomplete-wrap"><label>Email</label><input id="f_email" type="text" autocomplete="off" oninput="emailAC(this)"><div class="autocomplete-list"></div></div>

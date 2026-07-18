@@ -198,7 +198,7 @@ function clientToDbRow(d){
     dob:d.f_dob, age:parseInt(d.f_age)||null, gender:d.f_gender,
     ssn:d.f_ssn, relation:d.f_relation, marital_status:d.f_marital,
     tobacco:d.f_tobacco, height:d.f_height, weight:d.f_weight, insured:d.f_insured,
-    phone:d.f_phone, alt_phone:d.f_altPhone, email:d.f_email, email2:d.f_email2,
+    phone:d.f_phone, phone_ext:d.f_phoneExt, alt_phone:d.f_altPhone, alt_phone_ext:d.f_altPhoneExt, email:d.f_email, email2:d.f_email2,
     res_address:d.f_resAddress, res_zip:d.f_resZip, res_city:d.f_resCity,
     res_state:d.f_resSt, res_county:d.f_resCounty,
     same_address:d.f_sameAddress?1:0,
@@ -245,7 +245,7 @@ function dbRowToClient(row){
     f_ssnLast4:row.ssn_last4, f_cardLast4:row.card_last4,
     f_relation:row.relation, f_marital:row.marital_status,
     f_tobacco:row.tobacco, f_height:row.height, f_weight:row.weight, f_insured:row.insured,
-    f_phone:row.phone, f_altPhone:row.alt_phone, f_email:row.email, f_email2:row.email2,
+    f_phone:row.phone, f_phoneExt:row.phone_ext, f_altPhone:row.alt_phone, f_altPhoneExt:row.alt_phone_ext, f_email:row.email, f_email2:row.email2,
     f_resAddress:row.res_address, f_resZip:row.res_zip, f_resCity:row.res_city,
     f_resSt:row.res_state, f_resCounty:row.res_county,
     f_sameAddress:!!row.same_address,
@@ -761,7 +761,7 @@ var FIELDS=['firstName','mi','lastName','relation','marital','gender','tobacco',
   'waiveDental','totalMonthly',
   'resAddress','resZip','resCity','resSt','resCounty',
   'billAddress','billZip','billCity','billSt','billCounty',
-  'phone','altPhone','email','email2',
+  'phone','phoneExt','altPhone','altPhoneExt','email','email2',
   'emergencyName','emergencyRelation','emergencyPhone',
   'bankName','accountType','routing','account','accountName','cardType','cardNumber','cardExp','cvv',
   'healthPayDate','healthEffective','ancilPayDate','ancilEffective','dentalPayDate','dentalEffective','totalFirstMonth',
@@ -775,6 +775,7 @@ function clearForm(){
     var el=document.getElementById('f_'+f);if(!el)return;
     if(el.type==='checkbox')el.checked=false;else el.value='';
   });
+  syncExtVisibility(); // fields are now empty, so this re-hides both Ext boxes
   ['membersContainer','doctorsContainer','medsContainer','ancilContainer','otherIncomeContainer'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.innerHTML='';
   });
@@ -846,6 +847,7 @@ function getFormData(){
 }
 function setFormData(data){
   FIELDS.forEach(function(f){var el=document.getElementById('f_'+f);if(!el||data['f_'+f]===undefined)return;if(el.type==='checkbox')el.checked=data['f_'+f]===true||data['f_'+f]==='true';else el.value=data['f_'+f]||'';});
+  syncExtVisibility(); // reveal the Ext box only when this client actually has one
   document.getElementById('membersContainer').innerHTML='';
   if(data.members&&data.members.length)data.members.forEach(function(m){addMemberRow(m);});
   document.getElementById('doctorsContainer').innerHTML='';
@@ -988,6 +990,31 @@ function fmtMoneyBlur(el){
   var v=parseFloat(el.value.replace(/[^0-9.]/g,''));
   if(!isNaN(v))el.value='$'+v.toFixed(2);
   else el.value='';
+}
+/* Phone extension — kept out of the way until needed. The Ext box is hidden by
+   default; "+ Ext" reveals it, and it auto-reveals for clients that already have
+   one so an existing extension is never invisible. Stored in its own column
+   (phone_ext / alt_phone_ext) rather than packed into the phone string, which
+   would break formatPhone(), the tel: links and phone search. */
+function toggleExt(which){
+  var inp=document.getElementById('f_'+which+'Ext');
+  var btn=document.getElementById('extToggle_'+which);
+  if(!inp)return;
+  var showing=inp.style.display!=='none';
+  if(showing&&(inp.value||'').trim()){inp.focus();return;} // don't hide a filled ext
+  inp.style.display=showing?'none':'';
+  if(btn){btn.textContent=showing?'+ Ext':'Ext';btn.classList.toggle('active',!showing);}
+  if(!showing)inp.focus();
+}
+function syncExtVisibility(){
+  ['phone','altPhone'].forEach(function(w){
+    var inp=document.getElementById('f_'+w+'Ext');
+    var btn=document.getElementById('extToggle_'+w);
+    if(!inp)return;
+    var has=!!(inp.value||'').trim();
+    inp.style.display=has?'':'none';
+    if(btn){btn.textContent=has?'Ext':'+ Ext';btn.classList.toggle('active',has);}
+  });
 }
 function formatPhone(el){var v=el.value.replace(/\D/g,'');if(v.length>=10)el.value='('+v.substr(0,3)+') '+v.substr(3,3)+'-'+v.substr(6,4);}
 function formatDate(el){var v=el.value.replace(/\D/g,'');if(v.length>4)v=v.substr(0,2)+'/'+v.substr(2,2)+'/'+v.substr(4,4);else if(v.length>2)v=v.substr(0,2)+'/'+v.substr(2);el.value=v;}
