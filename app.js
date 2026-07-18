@@ -242,6 +242,15 @@ function deleteClientAPI(id){
 
 var VIEWS=['viewClients','viewNew','viewForm','viewImport','viewReports','viewCustomReports','viewCarriers','viewAdvSearch','viewTodo','viewSettings','viewRecent'];
 function showView(v){
+  // Guard against leaving the edit form with unsaved changes
+  var form=document.getElementById('viewForm');
+  if(form&&form.style.display!=='none'&&_formDirty&&v!=='form_edit'){
+    guardUnsavedChanges(function(){_doShowView(v);});
+    return;
+  }
+  _doShowView(v);
+}
+function _doShowView(v){
   VIEWS.forEach(function(id){document.getElementById(id).style.display='none';});
   document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active');});
   var map={clients:'viewClients',new:'viewNew',form_edit:'viewForm',import:'viewImport',reports:'viewReports',customReports:'viewCustomReports',carriers:'viewCarriers',advSearch:'viewAdvSearch',todo:'viewTodo',settings:'viewSettings',recent:'viewRecent'};
@@ -508,6 +517,7 @@ var FIELDS=['firstName','mi','lastName','relation','marital','gender','tobacco',
   'agent','submittedBy','date','leadSource','leadDate','renewed','notes'];
 
 function clearForm(){
+  clearFormDirty();
   FIELDS.forEach(function(f){
     var el=document.getElementById('f_'+f);if(!el)return;
     if(el.type==='checkbox')el.checked=false;else el.value='';
@@ -581,6 +591,7 @@ function editClient(id){
   try{clearForm();}catch(e){console.log('clearForm err:',e);}
   try{loadCarriersToSelect();}catch(e){}
   try{setFormData(c);}catch(e){console.log('setFormData err:',e);}
+  clearFormDirty();
   document.getElementById('formTitle').textContent=(c.f_firstName||'')+' '+(c.f_lastName||'');
   document.getElementById('deleteBtn').style.display='inline-block';
   document.getElementById('deleteBtn2').style.display='inline-block';
@@ -596,13 +607,17 @@ function editClient(id){
   formCard.insertBefore(docSec,actions);
   loadClientDocs(id);
 }
-function saveClient(){
+function saveClient(onSuccess){
   var data=getFormData();
   if(!data.f_firstName&&!data.f_lastName){toast('Please enter at least a first or last name.','error');return;}
   var isNew=!editingId;
   saveClientAPI(data,editingId).then(function(){
     aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientName:(data.f_firstName||'')+' '+(data.f_lastName||''),clientId:editingId||'new'});
-    loadClients();showView('clients');toast('Client saved!','success');
+    clearFormDirty();
+    loadClients();
+    if(typeof onSuccess==='function')onSuccess();
+    else showView('clients');
+    toast('Client saved!','success');
   }).catch(function(e){toast('Error: '+e,'error');});
 }
 function deleteClient(){
@@ -681,19 +696,59 @@ function showConfirm(message,onOk,opts){
   var modal=document.getElementById('confirmModal');if(!modal)return;
   document.getElementById('confirmTitle').textContent=opts.title||'Confirm';
   document.getElementById('confirmMessage').textContent=message||'Are you sure?';
-  var okBtn=document.getElementById('confirmOkBtn'),cancelBtn=document.getElementById('confirmCancelBtn');
+  var okBtn=document.getElementById('confirmOkBtn'),cancelBtn=document.getElementById('confirmCancelBtn'),extraBtn=document.getElementById('confirmExtraBtn');
   okBtn.textContent=opts.okText||'Confirm';
   cancelBtn.textContent=opts.cancelText||'Cancel';
   okBtn.className='btn '+(opts.danger===false?'btn-blue':'btn-red');
+  if(opts.extraText){
+    extraBtn.style.display='';
+    extraBtn.textContent=opts.extraText;
+    extraBtn.className='btn '+(opts.extraClass||'btn-green');
+  } else {
+    extraBtn.style.display='none';
+  }
   // Replace handlers freshly each open so old callbacks don't stack
-  var newOk=okBtn.cloneNode(true),newCancel=cancelBtn.cloneNode(true);
+  var newOk=okBtn.cloneNode(true),newCancel=cancelBtn.cloneNode(true),newExtra=extraBtn.cloneNode(true);
   okBtn.parentNode.replaceChild(newOk,okBtn);
   cancelBtn.parentNode.replaceChild(newCancel,cancelBtn);
+  extraBtn.parentNode.replaceChild(newExtra,extraBtn);
   var close=function(){modal.style.display='none';};
   newOk.addEventListener('click',function(){close();if(typeof onOk==='function')onOk();});
   newCancel.addEventListener('click',function(){close();if(typeof opts.onCancel==='function')opts.onCancel();});
+  newExtra.addEventListener('click',function(){close();if(typeof opts.onExtra==='function')opts.onExtra();});
   modal.style.display='flex';
 }
+/* Unsaved-changes tracking on the client edit form.
+   Set dirty on any input inside #viewForm; cleared by clearForm/setFormData/saveClient. */
+var _formDirty=false;
+function markFormDirty(){_formDirty=true;}
+function clearFormDirty(){_formDirty=false;}
+document.addEventListener('DOMContentLoaded',function(){
+  var f=document.getElementById('viewForm');if(!f)return;
+  f.addEventListener('input',markFormDirty,true);
+  f.addEventListener('change',markFormDirty,true);
+});
+/* Called by showView() and Cancel button before actually navigating away from viewForm.
+   Returns true if we should proceed immediately; otherwise shows a modal and calls proceed() later. */
+function guardUnsavedChanges(proceed){
+  var cur=document.getElementById('viewForm');
+  if(!cur||cur.style.display==='none'||!_formDirty){proceed();return;}
+  showConfirm('You have unsaved changes. Save them before leaving?',
+    function(){_formDirty=false;proceed();},
+    {
+      title:'Unsaved Changes',
+      okText:'Discard & Leave',
+      cancelText:'Stay',
+      extraText:'Save & Leave',
+      onExtra:function(){
+        try{saveClient(function(){proceed();});}catch(e){_formDirty=false;proceed();}
+      }
+    });
+}
+/* Warn on tab-close only when the form is dirty */
+window.addEventListener('beforeunload',function(e){
+  if(_formDirty){e.preventDefault();e.returnValue='';}
+});
 /* Row-removal helper used by generated rows so onclick attributes stay short */
 function confirmRemoveRow(el,message,after){
   showConfirm(message||'Remove this row?',function(){
@@ -712,12 +767,16 @@ function closeMedsPasteModal(){var m=document.getElementById('medsPasteModal');i
 function parseMedLine(line){
   var s=line.replace(/[–—]/g,'-').replace(/\s+/g,' ').trim();
   if(!s)return null;
-  // Extract dose: number (optionally decimal) followed by mg / mcg / g / units
-  var doseMatch=s.match(/(\d+(?:\.\d+)?)\s*(mg|mcg|g|units?|iu|ml)\b/i);
+  // Extract dose: number (optionally decimal) with OPTIONAL unit (mg/mcg/g/units/iu/ml).
+  // Unit optional handles inputs like "Metformin 30 twice" — 30 → dose, "twice" → frequency.
+  var doseMatch=s.match(/\b(\d+(?:\.\d+)?)\s*(mg|mcg|g|units?|iu|ml)?\b/i);
   if(!doseMatch)return{name:s.replace(/^-+|-+$/g,'').trim(),mg:'',frequency:''};
-  var mg=doseMatch[1]+doseMatch[2].toLowerCase();
+  var unit=(doseMatch[2]||'mg').toLowerCase();
+  var mg=doseMatch[1]+unit;
   var before=s.slice(0,doseMatch.index).trim().replace(/[-,]+$/,'').trim();
   var after=s.slice(doseMatch.index+doseMatch[0].length).trim().replace(/^[-,]+/,'').trim();
+  // If no name found before the number (line starts with number), skip — likely not a med
+  if(!before)return{name:s,mg:'',frequency:''};
   return{name:before,mg:mg,frequency:after};
 }
 function importPastedMeds(){
