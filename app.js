@@ -1721,6 +1721,36 @@ function addCarrier(){
 /* Universal quick-search modal (Cmd+K / Ctrl+K). Fuzzy-searches clients by name,
    phone, email, DOB, plan carrier. Keyboard nav + Enter to open. */
 var _quickSearchIdx=0;
+var _topSearchIdx=0;
+
+// Shared matcher for both search surfaces (modal + permanent top bar).
+function _searchClients(q){
+  q=(q||'').trim().toLowerCase();
+  return (clients||[]).filter(function(c){
+    if(!q)return true;
+    var hay=[
+      (c.f_firstName||'')+' '+(c.f_lastName||''),
+      c.f_phone||'',c.f_email||'',c.f_dob||'',
+      c.f_planCarrier||'',c.f_planType||'',c.f_agent||''
+    ].join(' ').toLowerCase();
+    return hay.indexOf(q)!==-1;
+  }).slice(0,10);
+}
+// Shared result-row markup. hoverJs runs on mouseenter to move the active index.
+function _searchRowsHtml(results,activeIdx,hoverFn,pickFn){
+  return results.map(function(c,i){
+    var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()||'Unnamed';
+    var sub=[c.f_phone,c.f_email,c.f_dob].filter(Boolean).join(' · ');
+    var meta=[c.f_planType,c.f_planCarrier,c.f_agent].filter(Boolean).join(' · ');
+    return '<div class="qs-row" data-id="'+c._id+'" onmouseenter="'+hoverFn+'('+i+')" onmousedown="'+pickFn+'()" style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #f0f3f7;'+(i===activeIdx?'background:var(--accent-tint);':'')+'">'+
+      '<div style="font-weight:600;font-size:13px;color:var(--text);">'+name+'</div>'+
+      (sub?'<div style="font-size:11px;color:var(--text-muted);margin-top:1px;">'+sub+'</div>':'')+
+      (meta?'<div style="font-size:11px;color:var(--text-subtle);margin-top:1px;">'+meta+'</div>':'')+
+      '</div>';
+  }).join('');
+}
+
+/* ---- Modal surface (sidebar Search button + Cmd/Ctrl+K) ---- */
 function openQuickSearch(){
   var m=document.getElementById('quickSearchModal');if(!m)return;
   m.style.display='flex';
@@ -1730,47 +1760,73 @@ function openQuickSearch(){
   setTimeout(function(){inp.focus();},30);
 }
 function closeQuickSearch(){var m=document.getElementById('quickSearchModal');if(m)m.style.display='none';}
+function _qsHover(i){_quickSearchIdx=i;renderQuickSearch();}
 function renderQuickSearch(){
-  var q=(document.getElementById('quickSearchInput').value||'').trim().toLowerCase();
+  var q=document.getElementById('quickSearchInput').value||'';
   var box=document.getElementById('quickSearchResults');if(!box)return;
-  var results=(clients||[]).filter(function(c){
-    if(!q)return true;
-    var hay=[
-      (c.f_firstName||'')+' '+(c.f_lastName||''),
-      c.f_phone||'',c.f_email||'',c.f_dob||'',
-      c.f_planCarrier||'',c.f_planType||'',c.f_agent||''
-    ].join(' ').toLowerCase();
-    return hay.indexOf(q)!==-1;
-  }).slice(0,10);
+  var results=_searchClients(q);
   if(_quickSearchIdx>=results.length)_quickSearchIdx=Math.max(0,results.length-1);
   if(!results.length){
-    box.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">'+(q?'No clients match "'+q+'"':'Start typing to search '+(clients.length||0)+' clients')+'</div>';
+    box.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">'+(q.trim()?'No clients match "'+q.trim()+'"':'Start typing to search '+(clients.length||0)+' clients')+'</div>';
     return;
   }
-  box.innerHTML=results.map(function(c,i){
-    var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()||'Unnamed';
-    var sub=[c.f_phone,c.f_email,c.f_dob].filter(Boolean).join(' · ');
-    var meta=[c.f_planType,c.f_planCarrier,c.f_agent].filter(Boolean).join(' · ');
-    var active=i===_quickSearchIdx;
-    return '<div class="qs-row" data-id="'+c._id+'" onmouseenter="_quickSearchIdx='+i+';renderQuickSearch();" onmousedown="pickQuickSearch()" style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #f0f3f7;'+(active?'background:var(--accent-tint);':'')+'">'+
-      '<div style="font-weight:600;font-size:13px;color:var(--text);">'+name+'</div>'+
-      (sub?'<div style="font-size:11px;color:var(--text-muted);margin-top:1px;">'+sub+'</div>':'')+
-      (meta?'<div style="font-size:11px;color:var(--text-subtle);margin-top:1px;">'+meta+'</div>':'')+
-      '</div>';
-  }).join('');
+  box.innerHTML=_searchRowsHtml(results,_quickSearchIdx,'_qsHover','pickQuickSearch');
 }
 function pickQuickSearch(){
-  var q=(document.getElementById('quickSearchInput').value||'').trim().toLowerCase();
-  var results=(clients||[]).filter(function(c){
-    if(!q)return true;
-    var hay=[(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_phone||'',c.f_email||'',c.f_dob||'',c.f_planCarrier||'',c.f_planType||'',c.f_agent||''].join(' ').toLowerCase();
-    return hay.indexOf(q)!==-1;
-  }).slice(0,10);
-  var c=results[_quickSearchIdx];if(!c)return;
+  var c=_searchClients(document.getElementById('quickSearchInput').value)[_quickSearchIdx];
+  if(!c)return;
   closeQuickSearch();
   editClient(c._id);
 }
-// Global keybindings: Cmd/Ctrl+K opens, Esc closes, arrows navigate
+
+/* ---- Permanent top-bar surface (always visible above every view) ---- */
+function closeTopSearch(){
+  var box=document.getElementById('topSearchResults');
+  if(box)box.style.display='none';
+}
+function _tsHover(i){_topSearchIdx=i;renderTopSearch();}
+function renderTopSearch(){
+  var inp=document.getElementById('topSearchInput');
+  var box=document.getElementById('topSearchResults');
+  if(!inp||!box)return;
+  var q=(inp.value||'').trim();
+  // Only drop the panel once the user has typed — an empty bar stays quiet.
+  if(!q){box.style.display='none';return;}
+  var results=_searchClients(q);
+  if(_topSearchIdx>=results.length)_topSearchIdx=Math.max(0,results.length-1);
+  box.style.display='block';
+  box.innerHTML=results.length
+    ? _searchRowsHtml(results,_topSearchIdx,'_tsHover','pickTopSearch')
+    : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No clients match "'+q+'"</div>';
+}
+function pickTopSearch(){
+  var inp=document.getElementById('topSearchInput');
+  var c=_searchClients(inp.value)[_topSearchIdx];
+  if(!c)return;
+  inp.value='';_topSearchIdx=0;
+  closeTopSearch();inp.blur();
+  editClient(c._id);
+}
+function topSearchKey(e){
+  var box=document.getElementById('topSearchResults');
+  var open=box&&box.style.display!=='none';
+  if(e.key==='Escape'){
+    e.preventDefault();
+    if(open){closeTopSearch();}else{e.target.value='';e.target.blur();}
+    return;
+  }
+  if(!open)return;
+  if(e.key==='ArrowDown'){e.preventDefault();_topSearchIdx++;renderTopSearch();}
+  else if(e.key==='ArrowUp'){e.preventDefault();_topSearchIdx=Math.max(0,_topSearchIdx-1);renderTopSearch();}
+  else if(e.key==='Enter'){e.preventDefault();pickTopSearch();}
+}
+// Clicking anywhere outside the top-bar search closes its dropdown.
+document.addEventListener('mousedown',function(e){
+  var wrap=document.querySelector('.app-topbar .ts-wrap');
+  if(wrap&&!wrap.contains(e.target))closeTopSearch();
+});
+
+// Global keybindings: Cmd/Ctrl+K opens the modal, Esc closes, arrows navigate
 document.addEventListener('keydown',function(e){
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'&&_apiToken){
     e.preventDefault();openQuickSearch();return;

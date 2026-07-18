@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718u">
+<link rel="stylesheet" href="styles.css?v=20260718v">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -45,6 +45,18 @@
   </div>
 
   <div class="main">
+
+    <!-- PERMANENT TOP BAR — always-visible client search (AgencyBloc style).
+         Sidebar Search button + Cmd+K still open the full-screen modal. -->
+    <div class="app-topbar">
+      <div class="ts-wrap">
+        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="topSearchInput" placeholder="Search clients by name, phone, email, DOB..." autocomplete="off"
+               oninput="renderTopSearch()" onfocus="renderTopSearch()" onkeydown="topSearchKey(event)">
+        <span class="ts-kbd">&#8984;K</span>
+        <div id="topSearchResults" class="ts-results" style="display:none;"></div>
+      </div>
+    </div>
 
     <div id="quickSearchModal" class="modal-backdrop" style="display:none;align-items:flex-start;padding-top:80px;">
       <div class="modal-card" style="max-width:560px;padding:0;overflow:hidden;">
@@ -880,8 +892,8 @@
 </div>
 
 <script src="routing-lookup.js?v=20260718s"></script>
-<script src="zip-counties.js?v=20260718u"></script>
-<script src="app.js?v=20260718u"></script>
+<script src="zip-counties.js?v=20260718v"></script>
+<script src="app.js?v=20260718v"></script>
 
 </body>
 </html>
