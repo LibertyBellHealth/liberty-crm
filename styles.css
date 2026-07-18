@@ -273,6 +273,6 @@ body{font-family:Arial,sans-serif;font-size:14px;background:#f4f6f9;color:#222;}
 .phone-row{display:flex;gap:6px;align-items:center;}
 .phone-row input:first-child{flex:1;min-width:0;}
 .ext-input{width:70px;flex-shrink:0;}
-.ext-toggle{background:none;border:none;padding:0 0 0 6px;font-family:Arial,sans-serif;font-size:10px;color:var(--text-muted);cursor:pointer;text-transform:none;letter-spacing:0;}
+.ext-toggle{background:none;border:none;padding:0 0 0 6px;font-family:Arial,sans-serif;font-size:13px;line-height:1;color:var(--text-muted);cursor:pointer;text-transform:none;letter-spacing:0;}
 .ext-toggle:hover{color:var(--accent);text-decoration:underline;}
 .ext-toggle.active{color:var(--accent);}

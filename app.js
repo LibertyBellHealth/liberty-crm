@@ -1000,10 +1000,9 @@ function extLabel(w){
   var inp=document.getElementById('f_'+w+'Ext');
   var btn=document.getElementById('extToggle_'+w);
   if(!btn)return;
-  var v=(inp&&inp.value||'').trim();
-  var open=inp&&inp.style.display!=='none';
-  btn.textContent=open?'Ext':(v?'Ext '+v:'+ Ext');
-  btn.classList.toggle('active',!!v||open);
+  // Always a bare "+" — no label text, no value shown.
+  btn.textContent='+';
+  btn.classList.toggle('active', !!(inp&&inp.style.display!=='none'));
 }
 function toggleExt(which){
   var inp=document.getElementById('f_'+which+'Ext');
