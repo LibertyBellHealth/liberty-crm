@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260717u">
+<link rel="stylesheet" href="styles.css?v=20260717v">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -236,23 +236,26 @@
           <!-- 3. DEMOGRAPHICS & HOUSEHOLD -->
           <div class="form-section">
             <div class="form-section-title">Household Members</div>
-            <div class="fg member-row" style="grid-template-columns:1.4fr 0.3fr 1.4fr 0.7fr 0.5fr 0.5fr 0.55fr 0.5fr 0.5fr 0.85fr 0.45fr 1.2fr 0.6fr 30px;gap:6px;margin-bottom:10px;align-items:end;">
-              <div class="field"><label>First Name</label><input id="f_firstName"></div>
-              <div class="field"><label>MI</label><input id="f_mi" maxlength="1"></div>
-              <div class="field"><label>Last Name</label><input id="f_lastName"></div>
-              <div class="field"><label>Relation</label><select id="f_relation"><option></option><option>Self</option><option>Spouse</option><option>Child</option><option>Mother</option><option>Father</option></select></div>
-              <div class="field"><label>Married</label><select id="f_marital"><option></option><option>Yes</option><option>No</option><option>Divorced</option><option>Widowed</option></select></div>
-              <div class="field"><label>Gender</label><select id="f_gender"><option></option><option>M</option><option>F</option></select></div>
-              <div class="field"><label>Tobacco</label><select id="f_tobacco"><option></option><option>Yes</option><option>No</option></select></div>
-              <div class="field"><label>Height</label><input id="f_height" placeholder="5'10&quot;" oninput="fmtHeight(this)"></div>
-              <div class="field"><label>Weight</label><input id="f_weight" placeholder="lbs"></div>
-              <div class="field"><label>DOB</label><input type="date" id="f_dob" onchange="calcAge()"></div>
-              <div class="field"><label>Age</label><input id="f_age" readonly style="background:#f9f9f9;"></div>
-              <div class="field"><label>SSN</label>
-                <input id="f_ssn" type="password" placeholder="XXX-XX-XXXX" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11">
+            <div class="member-row-data" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-alt);margin-bottom:8px;">
+              <div class="fg" style="grid-template-columns:1.4fr 0.3fr 1.4fr 0.9fr 0.7fr 0.7fr 0.8fr;gap:8px;align-items:end;margin-bottom:8px;">
+                <div class="field"><label>First Name</label><input id="f_firstName"></div>
+                <div class="field"><label>MI</label><input id="f_mi" maxlength="1"></div>
+                <div class="field"><label>Last Name</label><input id="f_lastName"></div>
+                <div class="field"><label>Relation</label><select id="f_relation"><option></option><option>Self</option><option>Spouse</option><option>Child</option><option>Mother</option><option>Father</option></select></div>
+                <div class="field"><label>Married</label><select id="f_marital"><option></option><option>Yes</option><option>No</option><option>Divorced</option><option>Widowed</option></select></div>
+                <div class="field"><label>Gender</label><select id="f_gender"><option></option><option>M</option><option>F</option></select></div>
+                <div class="field"><label>Insured</label><select id="f_insured"><option></option><option>Yes</option><option>No</option></select></div>
               </div>
-              <div class="field"><label>Insured</label><select id="f_insured"><option></option><option>Yes</option><option>No</option></select></div>
-              <div></div>
+              <div class="fg" style="grid-template-columns:1.2fr 0.6fr 1.2fr 0.7fr 0.7fr 0.7fr;gap:8px;align-items:end;">
+                <div class="field"><label>DOB</label><input type="date" id="f_dob" onchange="calcAge()"></div>
+                <div class="field"><label>Age</label><input id="f_age" readonly style="background:#f9f9f9;"></div>
+                <div class="field"><label>SSN</label>
+                  <input id="f_ssn" type="password" placeholder="XXX-XX-XXXX" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11">
+                </div>
+                <div class="field"><label>Height</label><input id="f_height" placeholder="5'10&quot;" oninput="fmtHeight(this)"></div>
+                <div class="field"><label>Weight</label><input id="f_weight" placeholder="lbs"></div>
+                <div class="field"><label>Tobacco</label><select id="f_tobacco"><option></option><option>Yes</option><option>No</option></select></div>
+              </div>
             </div>
             <div id="membersContainer" style="margin-top:6px;"></div>
             <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
@@ -851,7 +854,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20260717u"></script>
+<script src="app.js?v=20260717v"></script>
 
 </body>
 </html>

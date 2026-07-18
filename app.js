@@ -1138,21 +1138,26 @@ function fetchCountiesForPlaces(places,prefix,saved){
 
 function addMemberRow(data){
   var uid='m'+Date.now()+Math.floor(Math.random()*1000);
-  var div=document.createElement('div');div.className='member-row-data';
-  div.style.cssText='display:grid;grid-template-columns:1.4fr 0.3fr 1.4fr 0.7fr 0.5fr 0.5fr 0.55fr 0.5fr 0.5fr 0.85fr 0.45fr 1.2fr 0.6fr 30px;gap:6px;align-items:end;margin-bottom:6px;';
-  div.innerHTML=
-    mk('First Name','firstName',data)+mkS('MI','mi',data)+mk('Last Name','lastName',data)+
-    mkSel('Relation','relation',['','Spouse','Child','Mother','Father','Other'],data)+
-    mkSel('Married','married',['','Yes','No'],data)+
-    mkSel('Gender','gender',['','M','F'],data)+
-    mkSel('Tobacco','tobacco',['','Yes','No'],data)+
-    mkSmall('Height','height',data)+mkSmall('Weight','weight',data)+
-    '<div class="field"><label style="font-size:9px;">DOB</label><input type="date" data-field="dob" id="'+uid+'_dob" value="'+(data&&data.dob||'')+'" onchange="calcMemberAge(this,\''+uid+'_age\')" style="font-size:11px;padding:4px 5px;"></div>'+
-    '<div class="field"><label>Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;" value="'+(data&&data.age||'')+'"></div>'+
-    '<div class="field"><label>SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11" style="width:100%;"></div>'+
-    mkSel('Insured','insured',['','Yes','No'],data)+
-    '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this household member?\',updateMemberCount)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
-  document.getElementById('membersContainer').appendChild(div);
+  var wrap=document.createElement('div');wrap.className='member-row-data member-two-row';
+  wrap.style.cssText='padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-alt);margin-bottom:8px;';
+  wrap.innerHTML=
+    '<div style="display:grid;grid-template-columns:1.4fr 0.3fr 1.4fr 0.9fr 0.7fr 0.7fr 0.8fr 30px;gap:8px;align-items:end;margin-bottom:8px;">'+
+      mk('First Name','firstName',data)+mkS('MI','mi',data)+mk('Last Name','lastName',data)+
+      mkSel('Relation','relation',['','Spouse','Child','Mother','Father','Other'],data)+
+      mkSel('Married','married',['','Yes','No'],data)+
+      mkSel('Gender','gender',['','M','F'],data)+
+      mkSel('Insured','insured',['','Yes','No'],data)+
+      '<button type="button" class="icon-btn" onclick="confirmRemoveRow(this,\'Remove this household member?\',updateMemberCount)" title="Remove"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1.2fr 0.6fr 1.2fr 0.7fr 0.7fr 0.7fr;gap:8px;align-items:end;">'+
+      '<div class="field"><label>DOB</label><input type="date" data-field="dob" id="'+uid+'_dob" value="'+(data&&data.dob||'')+'" onchange="calcMemberAge(this,\''+uid+'_age\')"></div>'+
+      '<div class="field"><label>Age</label><input data-field="age" id="'+uid+'_age" readonly style="background:#f9f9f9;" value="'+(data&&data.age||'')+'"></div>'+
+      '<div class="field"><label>SSN</label><input data-field="ssn" id="'+uid+'_ssn" type="password" placeholder="XXX-XX-XXXX" value="'+(data&&data.ssn||'')+'" oninput="formatSSN(this)" onfocus="focusReveal(this)" onblur="blurReveal(this)" maxlength="11"></div>'+
+      '<div class="field"><label>Height</label><input data-field="height" value="'+(data&&data.height||'')+'" placeholder="5\'10&quot;" oninput="fmtHeight(this)"></div>'+
+      '<div class="field"><label>Weight</label><input data-field="weight" value="'+(data&&data.weight||'')+'" placeholder="lbs"></div>'+
+      mkSel('Tobacco','tobacco',['','Yes','No'],data)+
+    '</div>';
+  document.getElementById('membersContainer').appendChild(wrap);
   updateMemberCount();
 }
 function mk(lbl,field,data){return '<div class="field"><label>'+lbl+'</label><input data-field="'+field+'" value="'+(data&&data[field]||'')+'"></div>';}
