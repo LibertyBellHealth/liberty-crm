@@ -1342,27 +1342,97 @@ function saveCarriers(){
 function addCarrier(){
   var name=prompt('Enter carrier name:');
   if(!name)return;
-  carriers.push({name:name,contact:'',phone:'',email:''});
+  carriers.push({name:name,contact:'',phone:'',email:'',availability:[]});
   saveCarriers();
   renderCarriers();
 }
+/* Seed the carriers list from the bundled master list (CARRIER_SEED — 175 unique
+   carriers with state × product-type availability parsed from user's insurance
+   list). Merges: existing carriers with the same name get availability extended
+   without duplicates; new carriers are appended. Never overwrites contact info. */
+function seedCarriersFromMaster(){
+  if(typeof CARRIER_SEED==='undefined'){toast('Master list not loaded','error');return;}
+  var byName={};
+  carriers.forEach(function(c){byName[c.name]=c;if(!c.availability)c.availability=[];});
+  var added=0,merged=0;
+  CARRIER_SEED.forEach(function(sc){
+    if(!byName[sc.name]){
+      carriers.push({name:sc.name,contact:'',phone:'',email:'',availability:sc.availability.slice()});
+      added++;
+    } else {
+      var existing=byName[sc.name];
+      var seen={};existing.availability.forEach(function(a){seen[a.state+'|'+a.type]=1;});
+      var before=existing.availability.length;
+      sc.availability.forEach(function(a){if(!seen[a.state+'|'+a.type]){existing.availability.push(a);}});
+      if(existing.availability.length>before)merged++;
+    }
+  });
+  saveCarriers();
+  populateCarrierFilterOptions();
+  renderCarriers();
+  toast('Seeded '+added+' new carrier'+(added===1?'':'s')+(merged?', merged '+merged+' existing':''),'success');
+}
+function populateCarrierFilterOptions(){
+  var sel=document.getElementById('carrierFilterState');if(!sel)return;
+  var cur=sel.value;
+  var states={};(carriers||[]).forEach(function(c){(c.availability||[]).forEach(function(a){states[a.state]=1;});});
+  var keys=Object.keys(states).sort();
+  sel.innerHTML='<option value="">All States</option>'+keys.map(function(s){return '<option value="'+s+'">'+s+'</option>';}).join('');
+  sel.value=cur;
+}
+var TYPE_LABELS={'ACA':'ACA','MA':'Medicare Advantage','Medigap':'Medigap'};
+var TYPE_COLORS={'ACA':'#185FA5','MA':'#1a7740','Medigap':'#c07000'};
 function renderCarriers(){
   var container=document.getElementById('carrierList');
   if(!container)return;
+  populateCarrierFilterOptions();
+  var q=((document.getElementById('carrierSearch')||{}).value||'').toLowerCase().trim();
+  var fs=(document.getElementById('carrierFilterState')||{}).value||'';
+  var ft=(document.getElementById('carrierFilterType')||{}).value||'';
+  var list=(carriers||[]).slice().sort(function(a,b){return a.name.localeCompare(b.name);});
+  var filtered=list.filter(function(c){
+    if(q&&(c.name||'').toLowerCase().indexOf(q)===-1)return false;
+    var av=c.availability||[];
+    if(fs&&!av.some(function(a){return a.state===fs;}))return false;
+    if(ft&&!av.some(function(a){return a.type===ft;}))return false;
+    return true;
+  });
+  var countEl=document.getElementById('carrierCount');
+  if(countEl)countEl.textContent=filtered.length+' of '+list.length+' carrier'+(list.length===1?'':'s');
   container.innerHTML='';
-  if(carriers.length===0){
-    container.innerHTML='<p style="text-align:center;padding:20px;color:#999;">No carriers yet. Click "+ Add Carrier" to add one.</p>';
+  if(!filtered.length){
+    container.innerHTML='<p style="text-align:center;padding:20px;color:#999;">'+(list.length?'No carriers match the current filters.':'No carriers yet. Click "Seed from Master List" or "+ Add Carrier" to start.')+'</p>';
     return;
   }
-  carriers.forEach(function(c,idx){
+  filtered.forEach(function(c){
+    var origIdx=carriers.indexOf(c);
     var div=document.createElement('div');
-    div.style.cssText='display:grid;grid-template-columns:1.5fr 1fr 0.8fr 30px;gap:8px;align-items:end;margin-bottom:8px;';
-    div.innerHTML='<div class="field"><label>Carrier Name</label><input value="'+c.name+'" oninput="carriers['+idx+'].name=this.value;saveCarriers();"></div>'+
-      '<div class="field"><label>Contact Person</label><input value="'+(c.contact||'')+'" oninput="carriers['+idx+'].contact=this.value;saveCarriers();"></div>'+
-      '<div class="field"><label>Phone</label><input value="'+(c.phone||'')+'" oninput="carriers['+idx+'].phone=this.value;saveCarriers();"></div>'+
-      '<button class="btn btn-red" style="padding:3px 6px;align-self:flex-end;font-size:11px;" onclick="carriers.splice('+idx+',1);saveCarriers();renderCarriers();">x</button>';
+    div.style.cssText='padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);margin-bottom:8px;';
+    var av=(c.availability||[]).slice().sort(function(a,b){return (a.state+a.type).localeCompare(b.state+b.type);});
+    var chips=av.map(function(a){
+      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:10px;background:var(--surface-alt);border:1px solid var(--border);font-size:11px;color:var(--text);margin:2px;"><span style="width:6px;height:6px;border-radius:50%;background:'+TYPE_COLORS[a.type]+';"></span>'+a.state+' · '+TYPE_LABELS[a.type]+' <button type="button" onclick="removeCarrierAvailability('+origIdx+',\''+a.state+'\',\''+a.type+'\')" title="Remove this state/type" style="background:none;border:none;padding:0 0 0 3px;cursor:pointer;color:var(--text-subtle);font-size:12px;line-height:1;">×</button></span>';
+    }).join('');
+    div.innerHTML=
+      '<div style="display:grid;grid-template-columns:1.6fr 1fr 0.9fr 30px;gap:8px;align-items:end;margin-bottom:6px;">'+
+        '<div class="field"><label>Carrier Name</label><input value="'+(c.name||'').replace(/"/g,'&quot;')+'" oninput="carriers['+origIdx+'].name=this.value;saveCarriers();"></div>'+
+        '<div class="field"><label>Contact Person</label><input value="'+(c.contact||'').replace(/"/g,'&quot;')+'" oninput="carriers['+origIdx+'].contact=this.value;saveCarriers();"></div>'+
+        '<div class="field"><label>Phone</label><input value="'+(c.phone||'').replace(/"/g,'&quot;')+'" oninput="carriers['+origIdx+'].phone=this.value;saveCarriers();"></div>'+
+        '<button type="button" class="icon-btn" title="Delete carrier" onclick="deleteCarrier('+origIdx+')"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>'+
+      '</div>'+
+      (chips?'<div style="margin-top:4px;">'+chips+'</div>':'<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">No state/product coverage set</div>');
     container.appendChild(div);
   });
+}
+function deleteCarrier(idx){
+  var c=carriers[idx];if(!c)return;
+  showConfirm('Delete carrier "'+c.name+'"? This removes all state/product entries for this carrier.',function(){
+    carriers.splice(idx,1);saveCarriers();renderCarriers();
+  },{title:'Delete Carrier',okText:'Delete'});
+}
+function removeCarrierAvailability(idx,state,type){
+  var c=carriers[idx];if(!c||!c.availability)return;
+  c.availability=c.availability.filter(function(a){return !(a.state===state&&a.type===type);});
+  saveCarriers();renderCarriers();
 }
 
 function loadCarriersToSelect(){
