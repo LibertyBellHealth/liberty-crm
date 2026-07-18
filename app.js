@@ -536,7 +536,7 @@ function clearForm(){
   var sa=document.getElementById('f_diffMailing');if(sa)sa.checked=false;
   var ms=document.getElementById('mailingAddressSection');if(ms)ms.style.display='none';
   var at=document.getElementById('f_addressType');if(at){at.value='Mailing';updateMailingTitle();}
-  var rb=document.getElementById('f_referredBy');if(rb)rb.value='';
+  var rb=document.getElementById('f_referredBy');if(rb){rb.value='';rb.style.borderColor='';rb.title='';}_referrerPicked=false;
   var rbf=document.getElementById('referredByField');if(rbf)rbf.style.display='none';
   var mf=document.getElementById('medicareFields');if(mf)mf.style.display='none';
   var mcd=document.getElementById('medicaidFields');if(mcd)mcd.style.display='none';
@@ -571,7 +571,12 @@ function getFormData(){
   var refByEl=document.getElementById('f_referredBy');
   var refBy=refByEl?refByEl.value.trim():'';
   var ls=(data.f_leadSource||'').trim();
-  if(/^referral$/i.test(ls)&&refBy)data.f_leadSource='Referral: '+refBy;
+  if(/^referral$/i.test(ls)&&refBy){
+    // Canonicalize spelling so "sarah smith" saves as "Sarah Smith" if that
+    // matches an existing entry — dedupes typos across clients.
+    var canon=canonicalReferrerName(refBy);
+    data.f_leadSource='Referral: '+(canon||refBy);
+  }
   // Address type packing: prefix bill_address with [BILL] or [BOTH] when the user
   // marked the extra address as billing or both. Mailing (default) gets no prefix
   // for cleanliness. Only applies if the address is actually populated.
@@ -624,8 +629,8 @@ function setFormData(data){
   var lsEl=document.getElementById('f_leadSource'),rbEl=document.getElementById('f_referredBy');
   if(lsEl&&rbEl){
     var packed=(data.f_leadSource||'').match(/^referral\s*:\s*(.+)$/i);
-    if(packed){lsEl.value='Referral';rbEl.value=packed[1].trim();}
-    else{rbEl.value='';}
+    if(packed){lsEl.value='Referral';rbEl.value=packed[1].trim();_referrerPicked=true;rbEl.style.borderColor='';}
+    else{rbEl.value='';_referrerPicked=false;rbEl.style.borderColor='';}
     toggleReferredBy();
   }
   if(data.f_resZip)restoreCounty(data.f_resZip,'res',data.f_resCounty);
@@ -1013,26 +1018,101 @@ function toggleReferredBy(){
 }
 /* Build the referrer typeahead datalist from unique referrers already on file
    so the same person's name doesn't get typed 5 different ways. */
-function refreshReferrerDatalist(){
-  var dl=document.getElementById('referrerOptions');if(!dl)return;
-  var seen={},names=[];
+/* Backwards-compat stub — old callsite calls refreshReferrerDatalist() but the
+   real work is now inside referrerAC() (built on demand from current data). */
+function refreshReferrerDatalist(){}
+/* Build a case-insensitive index of existing canonical referrer names + counts
+   from the current clients array. Canonical spelling is the most common one. */
+function buildReferrerIndex(){
+  var buckets={}; // lowerName -> {name, count, spellings:{spelling:count}}
   (clients||[]).forEach(function(c){
     var m=(c.f_leadSource||'').match(/^referral\s*:\s*(.+)$/i);
-    var n=m?m[1].trim():(c.f_referredBy||'').trim();
-    if(n&&!seen[n.toLowerCase()]){seen[n.toLowerCase()]=true;names.push(n);}
+    var raw=m?m[1].trim():'';
+    if(!raw)return;
+    var key=raw.toLowerCase();
+    if(!buckets[key])buckets[key]={name:raw,count:0,spellings:{}};
+    buckets[key].count++;
+    buckets[key].spellings[raw]=(buckets[key].spellings[raw]||0)+1;
+    // Canonical = most-used exact spelling
+    var top=Object.keys(buckets[key].spellings).sort(function(a,b){return buckets[key].spellings[b]-buckets[key].spellings[a];})[0];
+    buckets[key].name=top;
   });
-  names.sort();
-  dl.innerHTML=names.map(function(n){return '<option value="'+n.replace(/"/g,'&quot;')+'">';}).join('');
+  return buckets;
+}
+/* Look up canonical spelling for a typed name (case-insensitive). Returns null
+   if no existing referrer matches — caller can decide to prompt "+ Add new". */
+function canonicalReferrerName(typed){
+  var t=(typed||'').trim().toLowerCase();
+  if(!t)return null;
+  var idx=buildReferrerIndex();
+  return idx[t]?idx[t].name:null;
+}
+/* Autocomplete dropdown for the Referred By field. Shows existing referrers
+   with counts; last item is always "+ Add new" if the typed text doesn't
+   exactly match an existing entry. */
+var _referrerPicked=false; // did the user explicitly pick or add this session?
+function referrerAC(el){
+  var list=document.getElementById('referrerPicker');if(!list)return;
+  var q=(el.value||'').trim();var qLow=q.toLowerCase();
+  var idx=buildReferrerIndex();
+  var entries=Object.keys(idx).map(function(k){return idx[k];})
+    .sort(function(a,b){return b.count-a.count;});
+  var matches=q?entries.filter(function(e){return e.name.toLowerCase().indexOf(qLow)!==-1;}):entries;
+  var exact=idx[qLow];
+  var html='';
+  matches.slice(0,8).forEach(function(e){
+    var canonical=e.name.replace(/"/g,'&quot;');
+    html+='<div onmousedown="pickReferrer(\''+canonical.replace(/'/g,"\\'")+'\')" style="display:flex;justify-content:space-between;">'+
+      '<span>'+e.name+'</span>'+
+      '<span style="color:var(--text-muted);font-size:11px;">'+e.count+' referral'+(e.count===1?'':'s')+'</span></div>';
+  });
+  if(q&&!exact){
+    html+='<div onmousedown="addReferrer(\''+q.replace(/'/g,"\\'")+'\')" style="border-top:1px solid var(--border);color:var(--accent);font-weight:600;">'+
+      '+ Add new referrer: "'+q+'"</div>';
+  } else if(!q&&!entries.length){
+    html='<div style="color:var(--text-muted);cursor:default;">Type a name to add your first referrer</div>';
+  }
+  list.innerHTML=html;
+  list.style.display=html?'block':'none';
+  updateReferrerFieldState(el,!!exact||!q);
+}
+function updateReferrerFieldState(el,valid){
+  // Amber outline when the typed name isn't a canonical existing entry AND
+  // the user hasn't explicitly picked / added — nudges them to pick, not
+  // silently create a phantom referrer.
+  if(!el)return;
+  if(valid||_referrerPicked){el.style.borderColor='';el.title='';}
+  else{el.style.borderColor='var(--dot-warning)';el.title='This is a new name — click "+ Add new referrer" in the dropdown to add them, or pick an existing one.';}
+}
+function pickReferrer(name){
+  var el=document.getElementById('f_referredBy');if(!el)return;
+  el.value=name;_referrerPicked=true;markFormDirty();
+  document.getElementById('referrerPicker').style.display='none';
+  updateReferrerFieldState(el,true);
+}
+function addReferrer(name){
+  // Explicit add — user confirmed this is a genuinely new person, not a typo
+  var el=document.getElementById('f_referredBy');if(!el)return;
+  el.value=name.trim();_referrerPicked=true;markFormDirty();
+  document.getElementById('referrerPicker').style.display='none';
+  updateReferrerFieldState(el,true);
+  toast('New referrer added: '+name.trim(),'success');
+}
+function referrerBlur(){
+  var list=document.getElementById('referrerPicker');if(list)list.style.display='none';
+  var el=document.getElementById('f_referredBy');if(!el)return;
+  var typed=(el.value||'').trim();if(!typed){updateReferrerFieldState(el,true);return;}
+  // Auto-canonicalize on blur — if the typed name matches an existing entry
+  // case-insensitively, snap to that canonical spelling.
+  var canonical=canonicalReferrerName(typed);
+  if(canonical&&canonical!==typed){el.value=canonical;_referrerPicked=true;markFormDirty();}
+  updateReferrerFieldState(el,!!canonical||_referrerPicked);
 }
 /* Count how many times each referrer appears — used by the top-referrers report card */
 function getReferrerCounts(){
-  var counts={};
-  (clients||[]).forEach(function(c){
-    var m=(c.f_leadSource||'').match(/^referral\s*:\s*(.+)$/i);
-    var n=m?m[1].trim():'';
-    if(n){counts[n]=(counts[n]||0)+1;}
-  });
-  return Object.keys(counts).map(function(n){return{name:n,count:counts[n]};}).sort(function(a,b){return b.count-a.count;});
+  var idx=buildReferrerIndex();
+  return Object.keys(idx).map(function(k){return{name:idx[k].name,count:idx[k].count};})
+    .sort(function(a,b){return b.count-a.count;});
 }
 function updateMemberCount(){document.getElementById('memberCount').textContent=document.querySelectorAll('.member-row-data').length+1;}
 function populateCountySel(sel,counties,savedVal){

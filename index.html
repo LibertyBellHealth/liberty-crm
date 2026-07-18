@@ -13,7 +13,7 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718g">
+<link rel="stylesheet" href="styles.css?v=20260718h">
 </head>
 <body>
 <div id="toastContainer"></div>
@@ -421,7 +421,11 @@
                 <input id="f_leadSource" list="leadSourceOptions" placeholder="Select or type..." autocomplete="off" oninput="toggleReferredBy()">
                 <datalist id="leadSourceOptions"></datalist>
               </div>
-              <div class="field" id="referredByField" style="display:none;"><label>Referred By</label><input id="f_referredBy" placeholder="Person's name" list="referrerOptions" autocomplete="off"><datalist id="referrerOptions"></datalist></div>
+              <div class="field autocomplete-wrap" id="referredByField" style="display:none;">
+                <label>Referred By</label>
+                <input id="f_referredBy" placeholder="Pick or add a referrer" autocomplete="off" oninput="referrerAC(this)" onfocus="referrerAC(this)" onblur="setTimeout(referrerBlur,180);">
+                <div class="autocomplete-list" id="referrerPicker"></div>
+              </div>
               <div class="field"><label>Lead Date</label><input type="date" id="f_leadDate" oninput="clampDate(this)"></div>
               <div class="field"><label>Renewed</label><select id="f_renewed"><option></option><option>2026 Renewed</option><option>Not Renewed</option></select></div>
             </div>
@@ -827,8 +831,8 @@
   </div>
 </div>
 
-<script src="routing-lookup.js?v=20260718g"></script>
-<script src="app.js?v=20260718g"></script>
+<script src="routing-lookup.js?v=20260718h"></script>
+<script src="app.js?v=20260718h"></script>
 
 </body>
 </html>
