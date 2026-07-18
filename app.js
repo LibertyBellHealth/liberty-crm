@@ -34,17 +34,25 @@ function aiTrack(name, props) {
   } catch (e) { /* silent */ }
 }
 
-var _sessionTimer = null;
-function resetSessionTimer() {
-  clearTimeout(_sessionTimer);
-  _sessionTimer = setTimeout(function () {
-    aiTrack('SessionTimeout', { reason: '15min-inactivity' });
-    clearCRMStorage();
+/* HIPAA-oriented session inactivity: warn at 13 min, sign out at 15 min.
+   Any input event resets the timers so active use keeps the session alive. */
+var _sessionTimer=null, _sessionWarnTimer=null;
+var SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+var SESSION_WARN_MS    = 13 * 60 * 1000;
+function resetSessionTimer(){
+  clearTimeout(_sessionTimer);clearTimeout(_sessionWarnTimer);
+  if(!_apiToken)return; // only enforce once signed in
+  _sessionWarnTimer=setTimeout(function(){
+    try{toast('Session expiring in 2 minutes. Click anywhere to stay signed in.','info');}catch(e){}
+  },SESSION_WARN_MS);
+  _sessionTimer=setTimeout(function(){
+    aiTrack('SessionTimeout',{reason:'inactivity'});
+    try{toast('Signed out due to inactivity','error');}catch(e){}
     signOut();
-  }, 15 * 60 * 1000);
+  },SESSION_TIMEOUT_MS);
 }
-['click','keydown','mousemove','touchstart'].forEach(function(ev){
-  document.addEventListener(ev, resetSessionTimer, true);
+['click','keydown','mousemove','touchstart','scroll'].forEach(function(ev){
+  document.addEventListener(ev,resetSessionTimer,{passive:true,capture:true});
 });
 
 function clearCRMStorage() {
@@ -110,9 +118,28 @@ function onSignedIn(account){
   document.getElementById('mainApp').style.display='flex';
   document.getElementById('userEmail').textContent=email;
   aiTrack('UserSignIn',{email:email});
+  // Tag every subsequent App Insights event with this user so we can correlate
+  // errors / usage to a specific person when debugging.
+  try{window._aiUser=email;if(window.appInsights&&window.appInsights.setAuthenticatedUserContext)window.appInsights.setAuthenticatedUserContext(email);}catch(e){}
   resetSessionTimer();
-  refreshApiToken().then(function(){ loadClients(); });
+  refreshApiToken().then(function(){ loadClients(); routeFromHash(); });
 }
+/* Hash-based deep links so URLs like /#/client/<id> open that client directly.
+   Enables bookmarking and sharing a link to a specific record. */
+function routeFromHash(){
+  var h=(window.location.hash||'').replace(/^#/,'');
+  var m=h.match(/^\/client\/(.+)$/);
+  if(!m)return;
+  var id=decodeURIComponent(m[1]);
+  // Wait a tick for clients to be in memory if we just loaded them
+  var tryOpen=function(attempts){
+    var c=(clients||[]).find(function(x){return String(x._id)===String(id);});
+    if(c){editClient(id);}
+    else if(attempts>0){setTimeout(function(){tryOpen(attempts-1);},250);}
+  };
+  tryOpen(8);
+}
+window.addEventListener('hashchange',routeFromHash);
 var API_SCOPE='api://'+API_APP_ID+'/user_impersonation';
 // Only Graph scopes in loginRedirect — API_SCOPE from different resource causes 400 on token endpoint.
 // refreshApiToken() acquires API token silently after login (admin consent already granted).
@@ -286,6 +313,8 @@ function _doShowView(v){
   var vid=map[v];if(vid)document.getElementById(vid).style.display='block';
   var nid=navMap[v];if(nid)document.getElementById(nid).classList.add('active');
   if(vid)document.querySelector('.main').scrollTop=0;
+  // Clear the deep-link hash when leaving the edit form so URL matches the view
+  if(v!=='form_edit'&&window.location.hash){try{history.replaceState(null,'','#');}catch(e){window.location.hash='';}}
   if(v==='clients')maybeRevalidateClients();
   if(v==='carriers')renderCarriers();
   if(v==='form_edit'||v==='new')setTimeout(wireCopyableFields,50);
@@ -863,6 +892,8 @@ function editClient(id){
   if(!c){toast('Could not find client record. Please refresh and try again.','error');return;}
   aiTrack('ClientRecordOpened',{clientId:id,clientName:(c.f_firstName||'')+' '+(c.f_lastName||'')});
   trackRecentRecord(id,c);
+  // Deep-link URL so bookmarking / copy-link opens this client next time
+  try{if(('#/client/'+id)!==window.location.hash)window.location.hash='/client/'+id;}catch(e){}
   editingId=id;
   try{clearForm();}catch(e){console.log('clearForm err:',e);}
   try{loadCarriersToSelect();}catch(e){}
@@ -1768,14 +1799,24 @@ function fmtHeight(el){
 }
 
 // ===================== RECENT RECORDS =====================
-var _recentRecords=[];
-function loadRecentRecords(){try{_recentRecords=JSON.parse(localStorage.getItem('crm_recent')||'[]');}catch(e){_recentRecords=[];}}
+/* PHI-free recent records: persist only client IDs + access timestamps in
+   localStorage. Names / plan / agent are resolved from the in-memory clients
+   array at render time. Nothing sensitive ever hits disk. */
+var _recentRecords=[]; // [{id, accessed}]
+function loadRecentRecords(){
+  try{
+    var raw=JSON.parse(localStorage.getItem('crm_recent')||'[]');
+    // Migration: old entries stored {id, name, planType, agent, accessed}. Strip everything but id + accessed.
+    _recentRecords=raw.map(function(r){return {id:r.id,accessed:r.accessed||new Date().toISOString()};}).filter(function(r){return r.id;});
+    // If any migration was needed, re-persist the sanitized shape immediately so old PHI is gone.
+    if(raw.length&&raw[0]&&(raw[0].name||raw[0].planType||raw[0].agent))saveRecentRecords();
+  }catch(e){_recentRecords=[];}
+}
 function saveRecentRecords(){localStorage.setItem('crm_recent',JSON.stringify(_recentRecords));}
 loadRecentRecords();
-function trackRecentRecord(id,c){
-  var name=((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()||'Unknown';
+function trackRecentRecord(id,_ignored){
   _recentRecords=_recentRecords.filter(function(r){return String(r.id)!==String(id);});
-  _recentRecords.unshift({id:id,name:name,planType:c.f_planType||'',agent:c.f_agent||'',accessed:new Date().toISOString()});
+  _recentRecords.unshift({id:id,accessed:new Date().toISOString()});
   if(_recentRecords.length>20)_recentRecords=_recentRecords.slice(0,20);
   saveRecentRecords();
 }
@@ -1787,22 +1828,29 @@ function renderRecentRecords(){
   empty.style.display='none';
   el.innerHTML='';
   _recentRecords.forEach(function(r,i){
+    // Resolve display fields from the in-memory clients array; if a client was
+    // deleted since it was last opened, show a muted placeholder and skip the click.
+    var c=(clients||[]).find(function(x){return String(x._id)===String(r.id);});
+    var name=c?((c.f_firstName||'')+' '+(c.f_lastName||'')).trim()||'Unnamed':'(client not found)';
+    var planType=c?c.f_planType||'':'';
+    var agent=c?c.f_agent||'':'';
     var when=new Date(r.accessed);
     var whenStr=when.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' '+when.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
     var div=document.createElement('div');
-    div.style.cssText='display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;transition:background 0.1s;';
-    div.onmouseover=function(){this.style.background='#f0f4f8';};
-    div.onmouseout=function(){this.style.background='';};
+    div.style.cssText='display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid #f0f0f0;'+(c?'cursor:pointer;transition:background 0.1s;':'opacity:0.55;');
+    if(c){div.onmouseover=function(){this.style.background='#f0f4f8';};div.onmouseout=function(){this.style.background='';};}
     div.innerHTML=
       '<div style="width:24px;height:24px;border-radius:50%;background:#1a3a5c;color:#fff;font-size:11px;font-weight:bold;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'+(i+1)+'</div>'+
       '<div style="flex:1;">'+
-        '<div style="font-weight:600;font-size:13px;color:#1a3a5c;">'+r.name+'</div>'+
-        '<div style="font-size:11px;color:#666;margin-top:2px;">'+(r.planType?'<span style="background:#dbeafe;color:#1a3a5c;padding:1px 6px;border-radius:8px;font-size:10px;margin-right:6px;">'+r.planType+'</span>':'')+(r.agent||'')+'</div>'+
+        '<div style="font-weight:600;font-size:13px;color:#1a3a5c;">'+name+'</div>'+
+        '<div style="font-size:11px;color:#666;margin-top:2px;">'+(planType?'<span style="background:#dbeafe;color:#1a3a5c;padding:1px 6px;border-radius:8px;font-size:10px;margin-right:6px;">'+planType+'</span>':'')+(agent||'')+'</div>'+
       '</div>'+
       '<div style="font-size:10px;color:#999;white-space:nowrap;">'+whenStr+'</div>'+
-      '<button class="btn btn-blue" style="padding:4px 10px;font-size:11px;">Open</button>';
-    div.querySelector('.btn').addEventListener('click',function(e){e.stopPropagation();editClient(r.id);});
-    div.addEventListener('click',function(){editClient(r.id);});
+      (c?'<button class="btn btn-blue" style="padding:4px 10px;font-size:11px;">Open</button>':'');
+    if(c){
+      div.querySelector('.btn').addEventListener('click',function(e){e.stopPropagation();editClient(r.id);});
+      div.addEventListener('click',function(){editClient(r.id);});
+    }
     el.appendChild(div);
   });
 }
