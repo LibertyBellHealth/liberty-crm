@@ -13,17 +13,16 @@
   cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f"}
 });
 </script>
-<link rel="stylesheet" href="styles.css?v=20260718p">
+<link rel="stylesheet" href="styles.css?v=20260718q">
 </head>
 <body>
 <div id="toastContainer"></div>
 
-<div id="authScreen" class="auth-screen">
-  <div class="auth-box">
-    <div class="logo">Liberty Bell Health</div>
-    <p>Sign in with your Microsoft 365 account to access the CRM</p>
-    <button class="btn btn-blue" onclick="signIn()" style="width:100%;padding:10px;margin-bottom:10px;">Sign In with Microsoft</button>
-  </div>
+<div id="authScreen" style="position:fixed;inset:0;z-index:99999;background:#1a2b45;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;">
+  <div style="color:#fff;font-size:22px;font-weight:700;letter-spacing:0.5px;">Liberty Bell Health</div>
+  <div style="color:#8ca0b4;font-size:14px;">Client CRM</div>
+  <div id="authScreenMsg" style="color:#8ca0b4;font-size:13px;margin-top:8px;">Verifying authentication…</div>
+  <button id="authScreenBtn" onclick="signIn()" style="display:none;margin-top:8px;padding:10px 28px;background:#185FA5;color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;">Sign In with Microsoft</button>
 </div>
 
 <div id="mainApp" class="app" style="display:none;">
@@ -862,8 +861,8 @@
   </div>
 </div>
 
-<script src="routing-lookup.js?v=20260718p"></script>
-<script src="app.js?v=20260718p"></script>
+<script src="routing-lookup.js?v=20260718q"></script>
+<script src="app.js?v=20260718q"></script>
 
 </body>
 </html>

@@ -65,21 +65,43 @@ function initMSAL(){
     msalInstance.handleRedirectPromise().then(function(resp){
       if(resp&&resp.account){onSignedIn(resp.account);return;}
       var accounts=msalInstance.getAllAccounts();
-      if(accounts.length>0){onSignedIn(accounts[0]);}
-      else{showAuthScreen();}
+      if(accounts.length>0){
+        // Already signed in on this device — attempt silent Microsoft SSO
+        setAuthMsg('Signing you in…');
+        onSignedIn(accounts[0]);
+      } else {
+        // No cached account — reveal the Sign In button
+        showAuthScreen();
+      }
     }).catch(function(){showAuthScreen();});
   });
 }
-function showAuthScreen(){document.getElementById('authScreen').style.display='flex';document.getElementById('mainApp').style.display='none';}
+/* Show the login wall with the Sign In button. While MSAL is checking silent
+   auth we leave the button hidden and show 'Verifying authentication…'. */
+function setAuthMsg(text){var m=document.getElementById('authScreenMsg');if(m)m.textContent=text||'';}
+function showAuthScreen(){
+  var scr=document.getElementById('authScreen'),btn=document.getElementById('authScreenBtn');
+  if(scr)scr.style.display='flex';
+  document.getElementById('mainApp').style.display='none';
+  setAuthMsg('Sign in with your Microsoft 365 account to continue');
+  if(btn)btn.style.display='inline-block';
+}
 function onSignedIn(account){
   var email=(account&&(account.username||account.name||'')).toLowerCase();
   if(!ALLOWED_USERS.map(function(u){return u.toLowerCase();}).includes(email)){
-    // In-app denied banner + toast; delay the redirect so the user actually sees why.
-    var box=document.querySelector('.auth-box');
-    if(box){box.innerHTML='<div class="logo">Liberty Bell Health</div>'+
-      '<p style="color:#a02020;font-weight:600;margin-top:12px;">Access denied</p>'+
-      '<p style="color:#666;font-size:13px;margin-bottom:12px;">The account <strong>'+email+'</strong> isn\'t authorized for this application. You will be signed out.</p>'+
-      '<button class="btn btn-blue" style="width:100%;padding:10px;" onclick="msalInstance.logoutRedirect({redirectUri:REDIRECT_URI})">Sign out now</button>';}
+    // Show the denial inline on the loginWall so the user sees why before auto sign-out.
+    document.getElementById('authScreen').style.display='flex';
+    document.getElementById('mainApp').style.display='none';
+    setAuthMsg('');
+    var btn=document.getElementById('authScreenBtn');if(btn)btn.style.display='none';
+    var scr=document.getElementById('authScreen');
+    var existing=document.getElementById('authDeniedNote');if(existing)existing.remove();
+    var note=document.createElement('div');
+    note.id='authDeniedNote';
+    note.style.cssText='max-width:420px;text-align:center;padding:16px 20px;background:rgba(160,32,32,0.15);border:1px solid rgba(160,32,32,0.4);border-radius:8px;color:#fff;font-size:13px;line-height:1.6;';
+    note.innerHTML='<div style="color:#ff8080;font-weight:700;font-size:14px;margin-bottom:6px;">Access denied</div>'+
+      'The account <strong>'+email+'</strong> is not authorized for this application. Signing you out…';
+    scr.appendChild(note);
     try{toast('Access denied for '+email,'error');}catch(e){}
     setTimeout(function(){msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});},4000);
     return;
