@@ -88,7 +88,7 @@ function clearCRMStorage() {
   });
 }
 
-var msalInstance=null,spToken=null,clients=[],editingId=null,csvHeaders=[],csvData=[],currentReportData=[],carriers=[];
+var msalInstance=null,clients=[],editingId=null,csvHeaders=[],csvData=[],currentReportData=[],carriers=[];
 
 // ── MSAL authentication ────────────────────────────────────────
 function initMSAL(){
@@ -311,14 +311,27 @@ function loadClients(){
     renderSidebarRecent(); // names only resolvable once clients are in memory
   }).catch(function(e){console.error('Load error:',e);});
 }
+/* Reject on a non-2xx instead of sailing through it.
+   The backend's 500 path returns {error:'...'} — VALID JSON — so a bare .then(r=>r.json())
+   RESOLVED on failure. saveClient then took its success branch: cleared the dirty flag and
+   called loadClients(), which repopulated the form from the server and DISCARDED the user's
+   edit, behind a green "Client saved!" toast. Surface the server's own message when it sends
+   one. This is the shape editClient already used; it was the only status check in the file. */
+function _apiOk(r){
+  if(r.ok)return r;
+  return r.json().catch(function(){return null;}).then(function(body){
+    throw new Error((body&&body.error)||('HTTP '+r.status));
+  });
+}
 function saveClientAPI(data,id){
   var body=clientToDbRow(data);
   if(id)body.id=id;
   return fetch(API_BASE+'/health-clients',{method:'POST',headers:apiHeaders(),body:JSON.stringify(body)})
-    .then(function(r){return r.json();});
+    .then(_apiOk).then(function(r){return r.json();});
 }
 function deleteClientAPI(id){
-  return fetch(API_BASE+'/health-clients/'+id,{method:'DELETE',headers:apiHeaders()});
+  return fetch(API_BASE+'/health-clients/'+id,{method:'DELETE',headers:apiHeaders()})
+    .then(_apiOk);
 }
 
 var VIEWS=['viewClients','viewNew','viewForm','viewImport','viewReports','viewCarriers','viewAdvSearch','viewTodo','viewSettings','viewRecent'];
@@ -638,7 +651,9 @@ function quickFilterSpecial(v){var s=document.getElementById('filterSpecial');if
 var _lastClientsFetch=0;
 function maybeRevalidateClients(){
   var age=Date.now()-_lastClientsFetch;
-  if(age>30000&&spToken){loadClients();}
+  // Was `spToken`, which is declared nowhere and assigned nowhere — permanently undefined,
+  // so this whole SWR-on-tab-return path was dead and the list never refreshed.
+  if(age>30000&&_apiToken){loadClients();}
 }
 document.addEventListener('visibilitychange',function(){
   if(document.visibilityState==='visible'){
@@ -985,6 +1000,9 @@ function deleteClient(){
     deleteClientAPI(editingId).then(function(){
       aiTrack('ClientDeleted',{clientId:editingId}); // no PHI in telemetry
       loadClients();showView('clients');
+    }).catch(function(e){
+      // Previously uncaught: a failed delete still navigated away as if it had worked.
+      toast('Could not delete: '+(e&&e.message||e),'error');
     });
   },{title:'Delete Client',okText:'Delete'});
 }
@@ -1780,13 +1798,28 @@ function handleCSV(event){
   reader.readAsText(file);
 }
 function importClients(){
-  var imported=0;
+  // `.then(function(){imported++;})` counted every row as imported, because saveClientAPI
+  // never rejected — a CSV where every row 500'd still reported "Imported 40 clients!".
+  // Failures are counted separately, and the per-row rejection handler means one bad row
+  // no longer aborts the rows after it.
+  var imported=0,failed=0,firstError='';
   var promises=csvData.map(function(row){
     var data={};CRM_IMPORT_FIELDS.forEach(function(f){var col=document.getElementById('map_'+f.key);if(col&&col.value&&row[col.value]!==undefined)data[f.key]=row[col.value];});
     data.f_agent=data.f_agent||'Thomas Jaboro';
-    return saveClientAPI(data,null).then(function(){imported++;});
+    return saveClientAPI(data,null).then(function(){imported++;},function(e){
+      failed++;if(!firstError)firstError=String(e&&e.message||e);
+    });
   });
-  Promise.all(promises).then(function(){document.getElementById('importStatus').textContent='Imported '+imported+' clients!';loadClients();}).catch(function(e){document.getElementById('importStatus').textContent='Error: '+e;});
+  Promise.all(promises).then(function(){
+    var el=document.getElementById('importStatus');
+    if(failed){
+      el.textContent='Imported '+imported+', FAILED '+failed+(firstError?(' — first error: '+firstError):'');
+      toast(failed+' row'+(failed===1?'':'s')+' failed to import.','error');
+    }else{
+      el.textContent='Imported '+imported+' clients!';
+    }
+    loadClients();
+  });
 }
 
 // CARRIER MANAGEMENT
