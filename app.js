@@ -28,6 +28,11 @@ var ALLOWED_USERS = [
    quoted attribute values. Client data reaches the DOM from paste-import and CSV,
    so it is never safe to concatenate raw. Use textContent where practical instead. */
 var _fullRecordFailed=false; // true when GET /health-clients/{id} failed — blocks save
+// Optimistic-concurrency token for the record currently open in the form. Read from
+// GET /health-clients/{id} and sent back on save, so the server can refuse a write that
+// would silently overwrite someone else's newer edit (409). Null = unconditional write,
+// which is what a brand-new record and any pre-upgrade caller does.
+var _rowVersion=null;
 function escHtml(v){
   return String(v==null?'':v)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -364,12 +369,20 @@ function loadClients(){
 function _apiOk(r){
   if(r.ok)return r;
   return r.json().catch(function(){return null;}).then(function(body){
-    throw new Error((body&&body.error)||('HTTP '+r.status));
+    var err=new Error((body&&body.error)||('HTTP '+r.status));
+    // Carry the status so callers can distinguish a lost-update conflict (409) from a
+    // generic failure — they need different handling, not just a different message.
+    err.status=r.status;
+    if(body&&body.current_version)err.currentVersion=body.current_version;
+    throw err;
   });
 }
 function saveClientAPI(data,id){
   var body=clientToDbRow(data);
   if(id)body.id=id;
+  // Only on an update, and only when we actually read a version — otherwise omit it and the
+  // server writes unconditionally, which is the correct behaviour for a new record.
+  if(id&&_rowVersion)body.expected_version=_rowVersion;
   return fetch(API_BASE+'/health-clients',{method:'POST',headers:apiHeaders(),body:JSON.stringify(body)})
     .then(_apiOk).then(function(r){return r.json();});
 }
@@ -582,6 +595,8 @@ function startNewApp(type){
   if(type==='life'){toast('Life App coming soon!','info');return;}
   try{clearForm();}catch(e){console.log('clearForm error:',e);}
   editingId=null;
+  _rowVersion=null;
+  _fullRecordFailed=false;
   try{addDoctorRow();}catch(e){}
   try{addMedRow();}catch(e){}
   try{loadCarriersToSelect();}catch(e){}
@@ -984,6 +999,7 @@ function editClient(id){
   try{if(('#/client/'+id)!==window.location.hash)window.location.hash='/client/'+id;}catch(e){}
   editingId=id;
   _fullRecordFailed=false;
+  _rowVersion=null; // cleared until the full record arrives with the real token
   try{clearForm();}catch(e){console.log('clearForm err:',e);}
   try{loadCarriersToSelect();}catch(e){}
   // Populate from the list first so the form isn't blank while the fetch is in flight,
@@ -997,6 +1013,7 @@ function editClient(id){
     .then(function(row){
       // Ignore if the user navigated to a different record while this was loading
       if(String(editingId)!==String(id))return;
+      _rowVersion=row.row_version_hex||null;
       try{setFormData(dbRowToClient(row));clearFormDirty();}catch(e){console.log('setFormData(full) err:',e);}
     })
     .catch(function(){
@@ -1027,14 +1044,29 @@ function saveClient(onSuccess){
   // than real. Saving would write those blanks over the stored SSN / card / bank values.
   if(_fullRecordFailed){toast('This record did not fully load. Reload the page before saving to avoid overwriting sensitive fields.','error');return;}
   var isNew=!editingId;
-  saveClientAPI(data,editingId).then(function(){
+  saveClientAPI(data,editingId).then(function(res){
+    // Keep the token current so a second save in the same sitting isn't rejected as stale.
+    if(res&&res.row_version)_rowVersion=res.row_version;
     aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientId:editingId||'new'}); // no PHI in telemetry
     clearFormDirty();
     loadClients();
     if(typeof onSuccess==='function')onSuccess();
     else showView('clients');
     toast('Client saved!','success');
-  }).catch(function(e){toast('Error: '+e,'error');});
+  }).catch(function(e){
+    if(e&&e.status===409){
+      // Someone else saved this record first. Deliberately do NOT clear the dirty flag, do NOT
+      // reload, and do NOT navigate — the user's edit is still on screen and reloading here is
+      // exactly what would discard it. Long toast because this needs a decision, not a glance.
+      toast(e.message,'error',15000);
+      return;
+    }
+    if(e&&e.status===404){
+      toast('This client no longer exists — it was deleted elsewhere. Your changes were NOT saved.','error',15000);
+      return;
+    }
+    toast('Could not save: '+((e&&e.message)||e),'error',10000);
+  });
 }
 function deleteClient(){
   if(!editingId)return;
