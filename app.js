@@ -192,7 +192,8 @@ function onSignedIn(account){
   // Tag every subsequent App Insights event with this user so we can correlate
   // errors / usage to a specific person when debugging.
   try{window._aiUser=email;if(window.appInsights&&window.appInsights.setAuthenticatedUserContext)window.appInsights.setAuthenticatedUserContext(email);}catch(e){}
-  refreshApiToken().then(function(){ resetSessionTimer(); loadClients(); routeFromHash(); });
+  refreshApiToken().then(function(){
+    try{loadSettingsAPI();}catch(e){} resetSessionTimer(); loadClients(); routeFromHash(); });
 }
 /* Hash-based deep links so URLs like /#/client/<id> open that client directly.
    Enables bookmarking and sharing a link to a specific record. */
@@ -281,6 +282,78 @@ function addAuditEntry(clientName,action){
 // Global (non-client) events — exports, sign-in/out, denied access. client_name:'' keeps them
 // out of any one client's tab while still being in the trail.
 function logActivity(type,text){ _postAuditRecord({event_type:type,client_name:'',action:text}); }
+
+/* ── SETTINGS SYNC ────────────────────────────────────────────────────────────
+   These were localStorage-only, so two agents on two machines saw DIFFERENT agent lists,
+   lead sources, plan types and carriers — and everything was lost on sign-out, since the
+   sign-out wipe (correctly) clears crm_*. Now mirrored to AppSettings under scope 'health'.
+
+   scope:'health' is required. AppSettings is keyed on (scope, setting_key) precisely so the
+   two companies can each have an 'agents' key without one silently overwriting the other.
+
+   `raw` marks the two values stored as bare strings rather than JSON. */
+var _SYNCED_SETTINGS=[
+  ['crm_agents','agents',false],
+  ['crm_lead_sources','lead_sources',false],
+  ['crm_renewals','renewals',false],
+  ['crm_plan_types','plan_types',false],
+  ['crm_project_codes','project_codes',false],
+  ['crm_custom_meds','custom_meds',false],
+  ['crmCarriers','carriers',false],
+  ['crm_default_agent','default_agent',true],
+  ['crm_display_name','display_name',true]
+];
+var _settingsPushTimer=null,_settingsPushInFlight=0;
+// Write locally FIRST so the UI never waits on the network, then push. Debounced because the
+// settings screens fire several writes in a row (add an agent -> re-render -> save again).
+function _syncedSetItem(k,v){
+  try{localStorage.setItem(k,v);}catch(e){}
+  clearTimeout(_settingsPushTimer);
+  _settingsPushTimer=setTimeout(_pushSettings,800);
+}
+function _pushSettings(){
+  if(!_apiToken)return;
+  var body={scope:'health'};
+  _SYNCED_SETTINGS.forEach(function(e){
+    var raw=localStorage.getItem(e[0]);
+    if(raw===null)return;
+    if(e[2]){body[e[1]]=raw;return;}
+    try{body[e[1]]=JSON.parse(raw);}catch(err){body[e[1]]=raw;}
+  });
+  _settingsPushInFlight++;
+  fetch(API_BASE+'/settings',{method:'POST',headers:apiHeaders(),body:JSON.stringify(body),keepalive:true})
+    .then(_apiOk)
+    .catch(function(e){
+      // Loud, because the local value LOOKS saved. Silence here is how two machines drift apart.
+      toast('Settings saved on this device but did NOT sync: '+((e&&e.message)||e),'error',10000);
+    })
+    .then(function(){_settingsPushInFlight=Math.max(0,_settingsPushInFlight-1);});
+}
+function loadSettingsAPI(){
+  if(!_apiToken)return Promise.resolve();
+  return fetch(API_BASE+'/settings?scope=health',{headers:apiHeaders()})
+    .then(_apiOk).then(function(r){return r.json();})
+    .then(function(remote){
+      // A local save is in flight — applying the server's older copy now would revert what the
+      // user just typed. Home Care hit exactly this.
+      if(_settingsPushInFlight)return;
+      if(!remote||typeof remote!=='object')return;
+      var changed=false;
+      _SYNCED_SETTINGS.forEach(function(e){
+        if(!Object.prototype.hasOwnProperty.call(remote,e[1]))return;
+        var v=remote[e[1]];
+        try{localStorage.setItem(e[0],e[2]?String(v):JSON.stringify(v));changed=true;}catch(err){}
+      });
+      if(!changed)return;
+      // Re-read into memory and repaint, or the running page keeps the pre-sync values.
+      try{loadSettings();}catch(err){}
+      try{loadCarriers();}catch(err){}
+      try{loadCustomMeds();}catch(err){}
+      try{applySettingsToDropdowns();}catch(err){}
+      try{if(document.getElementById('viewSettings').style.display!=='none')renderSettings();}catch(err){}
+    })
+    .catch(function(){ /* first run or offline — the local values stand, and a later write pushes them */ });
+}
 
 function apiHeaders(){var h={'Content-Type':'application/json'};if(_apiToken)h['Authorization']='Bearer '+_apiToken;return h;}
 function authUploadHeaders(){return _apiToken?{'Authorization':'Bearer '+_apiToken}:{};}
@@ -1805,7 +1878,7 @@ function addDoctorRow(data){
 
 var _customMeds=[];
 function loadCustomMeds(){try{_customMeds=JSON.parse(localStorage.getItem('crm_custom_meds')||'[]');}catch(e){_customMeds=[];}}
-function saveCustomMed(name){if(!name)return;var n=name.trim();if(!n)return;if(MED_LIST.indexOf(n)===-1&&_customMeds.indexOf(n)===-1){_customMeds.push(n);_customMeds.sort();localStorage.setItem('crm_custom_meds',JSON.stringify(_customMeds));}}
+function saveCustomMed(name){if(!name)return;var n=name.trim();if(!n)return;if(MED_LIST.indexOf(n)===-1&&_customMeds.indexOf(n)===-1){_customMeds.push(n);_customMeds.sort();_syncedSetItem('crm_custom_meds',JSON.stringify(_customMeds));}}
 loadCustomMeds();
 
 var MED_LIST=['Abilify','Acarbose','Accolate','Accupril','Aciphex','Actonel','Actos','Adderall','Adderall XR','Advair','Advair Diskus','Aggrenox','Aldactone','Alendronate','Albuterol','Aleve','Allopurinol','Alprazolam','Altace','Ambien','Ambien CR','Amlodipine','Amoxicillin','Amoxicillin-Clavulanate','Amphetamine','Anastrozole','Androgel','Apixaban','Aripiprazole','Aspirin','Atenolol','Atomoxetine','Atorvastatin','Ativan','Augmentin','Azithromycin','Baclofen','Basaglar','Benadryl','Benazepril','Benicar','Benzonatate','Bisoprolol','Brilinta','Breo','Budesonide','Buprenorphine','Bupropion','Buspirone','Byetta','Bydureon','Caduet','Calcitriol','Carbamazepine','Carbidopa-Levodopa','Carvedilol','Celebrex','Celexa','Cephalexin','Cetirizine','Chantix','Cialis','Ciprofloxacin','Citalopram','Clindamycin','Clobetasol','Clonazepam','Clonidine','Clopidogrel','Colchicine','Colcrys','Combivent','Concerta','Coreg','Coreg CR','Coumadin','Cozaar','Crestor','Cyclobenzaprine','Cymbalta','Dapagliflozin','Dexamethasone','Dexilant','Dextroamphetamine','Diazepam','Diclofenac','Digoxin','Diltiazem','Diphenhydramine','Donepezil','Doxazosin','Doxycycline','Dulaglutide','Duloxetine','Dupixent','Effexor','Effexor XR','Eliquis','Empagliflozin','Enalapril','Entresto','Epidiolex','Escitalopram','Esomeprazole','Estradiol','Evista','Ezetimibe','Famotidine','Farxiga','Fentanyl','Ferrous Sulfate','Fexofenadine','Finasteride','Flagyl','Flexeril','Flomax','Flovent','Fluconazole','Fluoxetine','Fluticasone','Fluticasone-Salmeterol','Folic Acid','Fosamax','Furosemide','Gabapentin','Glimepiride','Glipizide','Glucophage','Glucotrol','Glyburide','Humalog','Humulin','Humulin N','Humulin R','Hydrochlorothiazide','Hydrocodone','Hydrocodone-Acetaminophen','Hydrocortisone','Hydroxychloroquine','Hydroxyzine','Ibuprofen','Invega','Invokamet','Invokana','Ipratropium','Irbesartan','Isosorbide','Janumet','Januvia','Jardiance','Juvisync','Ketamine','Klonopin','Lamictal','Lamotrigine','Lansoprazole','Lantus','Lantus SoloStar','Latuda','Levemir','Levofloxacin','Levothyroxine','Lexapro','Linagliptin','Linzess','Liraglutide','Lisinopril','Lisinopril-HCTZ','Lithium','Lopressor','Loratadine','Lorazepam','Losartan','Lovastatin','Lozol','Lyrica','Mavyret','Medroxyprogesterone','Meloxicam','Metformin','Metformin ER','Methocarbamol','Methylphenidate','Methylprednisolone','Metoprolol','Metoprolol Succinate','Metoprolol Tartrate','Metronidazole','Mirtazapine','Monjaro','Montelukast','Morphine','Mounjaro','Mucinex','Naproxen','Neurontin','Nexium','Nifedipine','Nitrofurantoin','Nitroglycerin','Norco','Nortriptyline','Novolin','Novolog','Novolog FlexPen','Nuvaring','Olmesartan','Omeprazole','Ondansetron','Oseltamivir','Ozempic','Oxycodone','Oxycodone-Acetaminophen','Oxycontin','Pantoprazole','Paroxetine','Paxil','Penicillin','Percocet','Phenergan','Phentermine','Plavix','Potassium Chloride','Pradaxa','Pravastatin','Prednisone','Pregabalin','Premarin','Prilosec','Pristiq','Proair','Prolia','Promethazine','Propranolol','Protonix','Provigil','Prozac','Quetiapine','Ramipril','Ranexa','Ranitidine','Reclipsen','Renvela','Repaglinide','Restasis','Rexulti','Risperidone','Ritalin','Rivaroxaban','Rosiglitazone','Rosuvastatin','Rybelsus','Saxenda','Semaglutide','Senna','Seroquel','Sertraline','Simvastatin','Singulair','Sitagliptin','Skyrizi','Solifenacin','Spironolactone','Strattera','Sulfamethoxazole','Sumatriptan','Symbicort','Synthroid','Tacrolimus','Tamsulosin','Temazepam','Testosterone','Tiotropium','Tizanidine','Topamax','Topiramate','Torsemide','Toujeo','Tramadol','Tradjenta','Trazodone','Tresiba','Trulicity','Valacyclovir','Valium','Valsartan','Venlafaxine','Ventolin','Vesicare','Viberzi','Victoza','Viibryd','Vimpat','Vitamin B12','Vitamin D','Voltaren','Vraylar','Warfarin','Wegovy','Wellbutrin','Xanax','Xarelto','Xifaxan','Xolair','Zestril','Zetia','Ziprasidone','Zofran','Zoloft','Zolpidem','Zopiclone','Zyprexa','Zyrtec'];
@@ -2041,7 +2114,7 @@ function loadCarriers(){
   carriers=saved?JSON.parse(saved):[];
 }
 function saveCarriers(){
-  localStorage.setItem('crmCarriers',JSON.stringify(carriers));
+  _syncedSetItem('crmCarriers',JSON.stringify(carriers));
 }
 function addCarrier(){
   showPrompt('Add Carrier','Carrier name:','',function(name){
@@ -2530,28 +2603,28 @@ function populateDefaultAgentSelect(){
 }
 function saveDefaultAgent(){
   var sel=document.getElementById('settingsDefaultAgent');if(!sel)return;
-  localStorage.setItem('crm_default_agent',sel.value);
+  _syncedSetItem('crm_default_agent',sel.value);
 }
 function addPlanTypeSetting(){
   var v=document.getElementById('newPlanTypeInput').value.trim();if(!v)return;
   if(_settingsPlanTypes.indexOf(v)!==-1){toast('Already exists.','info');return;}
-  _settingsPlanTypes.push(v);localStorage.setItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));
+  _settingsPlanTypes.push(v);_syncedSetItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));
   document.getElementById('newPlanTypeInput').value='';renderSettings();
 }
 function removePlanTypeSetting(i){
   showConfirm('Remove this plan type?',function(){
-    _settingsPlanTypes.splice(i,1);localStorage.setItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));renderSettings();
+    _settingsPlanTypes.splice(i,1);_syncedSetItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));renderSettings();
   },{title:'Remove',okText:'Remove'});
 }
 function addProjectCodeSetting(){
   var v=document.getElementById('newProjectCodeInput').value.trim();if(!v)return;
   if(_settingsProjectCodes.indexOf(v)!==-1){toast('Already exists.','info');return;}
-  _settingsProjectCodes.push(v);localStorage.setItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));
+  _settingsProjectCodes.push(v);_syncedSetItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));
   document.getElementById('newProjectCodeInput').value='';renderSettings();
 }
 function removeProjectCodeSetting(i){
   showConfirm('Remove this code?',function(){
-    _settingsProjectCodes.splice(i,1);localStorage.setItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
+    _settingsProjectCodes.splice(i,1);_syncedSetItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
   },{title:'Remove',okText:'Remove'});
 }
 function exportFullBackup(){
@@ -2900,9 +2973,9 @@ function loadSettings(){
   try{_settingsRenewals=JSON.parse(localStorage.getItem('crm_renewals')||'["2026 Renewed","Not Renewed"]');}catch(e){_settingsRenewals=["2026 Renewed","Not Renewed"];}
 }
 function saveSettings(){
-  localStorage.setItem('crm_agents',JSON.stringify(_settingsAgents));
-  localStorage.setItem('crm_lead_sources',JSON.stringify(_settingsLeadSources));
-  localStorage.setItem('crm_renewals',JSON.stringify(_settingsRenewals));
+  _syncedSetItem('crm_agents',JSON.stringify(_settingsAgents));
+  _syncedSetItem('crm_lead_sources',JSON.stringify(_settingsLeadSources));
+  _syncedSetItem('crm_renewals',JSON.stringify(_settingsRenewals));
   applySettingsToDropdowns();
 }
 loadSettings();
@@ -2949,9 +3022,9 @@ function removeAgentSetting(i){showConfirm('Remove this agent?',function(){_sett
 function addLeadSourceSetting(){var v=document.getElementById('newLeadSourceInput').value.trim();if(!v)return;if(_settingsLeadSources.indexOf(v)!==-1){toast('Lead source already exists.','info');return;}_settingsLeadSources.push(v);document.getElementById('newLeadSourceInput').value='';saveSettings();renderSettings();}
 function removeLeadSourceSetting(i){showConfirm('Remove this lead source?',function(){_settingsLeadSources.splice(i,1);saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
 function addCustomMedSetting(){var v=document.getElementById('newCustomMedInput').value.trim();if(!v)return;saveCustomMed(v);document.getElementById('newCustomMedInput').value='';renderSettings();}
-function removeCustomMedSetting(i){showConfirm('Remove this medication?',function(){_customMeds.splice(i,1);localStorage.setItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();},{title:'Remove',okText:'Remove'});}
+function removeCustomMedSetting(i){showConfirm('Remove this medication?',function(){_customMeds.splice(i,1);_syncedSetItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();},{title:'Remove',okText:'Remove'});}
 function addRenewalSetting(){var v=document.getElementById('newRenewalInput').value.trim();if(!v)return;if(_settingsRenewals.indexOf(v)!==-1){toast('Already exists.','info');return;}_settingsRenewals.push(v);document.getElementById('newRenewalInput').value='';saveSettings();renderSettings();}
 function removeRenewalSetting(i){showConfirm('Remove this renewal option?',function(){_settingsRenewals.splice(i,1);saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
-function saveCrmName(){var v=document.getElementById('settingsCrmName').value.trim();if(!v)return;localStorage.setItem('crm_display_name',v);document.querySelector('.sidebar .logo').childNodes[0].textContent=v;toast('CRM name updated!','success');}
+function saveCrmName(){var v=document.getElementById('settingsCrmName').value.trim();if(!v)return;_syncedSetItem('crm_display_name',v);document.querySelector('.sidebar .logo').childNodes[0].textContent=v;toast('CRM name updated!','success');}
 
 try{initMSAL();loadCarriers();loadSettingsExtras();applySettingsToDropdowns();}catch(e){console.log('MSAL error:',e);showAuthScreen();}
