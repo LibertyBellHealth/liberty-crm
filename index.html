@@ -77,6 +77,7 @@
     <!-- PERMANENT TOP BAR — always-visible client search (AgencyBloc style).
          Sidebar Search button + Cmd+K still open the full-screen modal. -->
     <div class="app-topbar">
+      <button type="button" class="sb-mobile-toggle" id="sbMobileToggle" onclick="toggleMobileSidebar()" aria-label="Menu" aria-expanded="false">&#9776;</button>
       <div class="ts-wrap">
         <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input id="topSearchInput" placeholder="Search clients by name, phone, email, DOB..." autocomplete="off"

@@ -798,6 +798,37 @@ function goToClientPage(n){_clientPage=n;renderClientTable(_clientFilteredCache.
 function toggleKebab(e){e.stopPropagation();var m=document.getElementById('clientKebabMenu');if(m)m.classList.toggle('open');}
 function closeKebab(){var m=document.getElementById('clientKebabMenu');if(m)m.classList.remove('open');}
 document.addEventListener('click',function(e){var w=document.querySelector('.kebab-wrap');if(w&&!w.contains(e.target))closeKebab();});
+/* Off-canvas sidebar for phones. Separate from toggleSidebar(), which is the DESKTOP
+   collapse-to-44px behaviour and is persisted; this one is transient and never stored, because
+   a drawer left "open" across loads would cover the app on the next visit. */
+function toggleMobileSidebar(force){
+  var sb=document.getElementById('sidebar');if(!sb)return;
+  var open=(force===undefined)?!sb.classList.contains('mobile-open'):!!force;
+  sb.classList.toggle('mobile-open',open);
+  var bd=document.getElementById('sbBackdrop');
+  if(open&&!bd){
+    bd=document.createElement('div');
+    bd.className='sb-backdrop';bd.id='sbBackdrop';
+    bd.addEventListener('click',function(){toggleMobileSidebar(false);});
+    document.body.appendChild(bd);
+  }else if(!open&&bd){ bd.remove(); }
+  var btn=document.getElementById('sbMobileToggle');
+  if(btn)btn.setAttribute('aria-expanded',open?'true':'false');
+}
+// Tapping a nav item should navigate AND close the drawer — leaving it open over the view the
+// user just asked for is the classic mobile-nav mistake.
+document.addEventListener('click',function(e){
+  var btn=e.target&&e.target.closest?e.target.closest('.nav-btn'):null;
+  if(btn)toggleMobileSidebar(false);
+},true);
+// Escape closes it, and a resize back to desktop must not leave a stranded backdrop.
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&document.getElementById('sbBackdrop'))toggleMobileSidebar(false);
+});
+window.addEventListener('resize',function(){
+  if(window.innerWidth>720&&document.getElementById('sbBackdrop'))toggleMobileSidebar(false);
+});
+
 function toggleSidebar(){
   var sb=document.getElementById('sidebar');if(!sb)return;
   sb.classList.toggle('collapsed');
