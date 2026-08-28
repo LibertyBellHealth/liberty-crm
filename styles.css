@@ -276,3 +276,66 @@ body{font-family:Arial,sans-serif;font-size:14px;background:#f4f6f9;color:#222;}
 .ext-toggle{background:none;border:none;padding:0 0 0 6px;font-family:Arial,sans-serif;font-size:13px;line-height:1;color:var(--text-muted);cursor:pointer;text-transform:none;letter-spacing:0;}
 .ext-toggle:hover{color:var(--accent);text-decoration:underline;}
 .ext-toggle.active{color:var(--accent);}
+
+/* ── RESPONSIVE ──────────────────────────────────────────────────────────────
+   This stylesheet had NO @media rules at all — the app was desktop-only. Checking a client's
+   plan or phone number from a phone is an ordinary thing for an agent to want to do.
+
+   The !important on .fg is load-bearing: nineteen elements in index.html carry an inline
+   grid-template-columns, and an inline style beats a plain stylesheet rule. Restructuring all
+   nineteen would be a far larger and riskier change than overriding them here. */
+
+/* Tablet / small laptop — the widest form grids become unusable well before the shell does. */
+@media (max-width: 1024px){
+  .fg{grid-template-columns:1fr 1fr !important;}
+  .g4,.g5{grid-template-columns:1fr 1fr;}
+  .member-row-compact{grid-template-columns:1fr 1fr !important;}
+}
+
+/* Phone */
+@media (max-width: 720px){
+  .fg,.g2,.g3,.g4,.g5,.member-row-compact{grid-template-columns:1fr !important;}
+
+  /* The sidebar is a fixed 220px column in a 100vh flex row, which on a 375px screen leaves
+     the content about 150px. It becomes an off-canvas drawer instead. */
+  .sidebar{
+    position:fixed;left:0;top:0;bottom:0;z-index:1200;width:250px;height:100dvh;
+    transform:translateX(-100%);transition:transform .2s ease;
+    box-shadow:0 0 28px rgba(0,0,0,.35);
+  }
+  .sidebar.mobile-open{transform:translateX(0);}
+  /* The DESKTOP collapse state must not also apply here, or the drawer opens empty. */
+  .sidebar.collapsed{width:250px;}
+  .sidebar.collapsed .logo,.sidebar.collapsed .nav-btn,
+  .sidebar.collapsed .auth-area,.sidebar.collapsed .sb-recent{display:block;}
+  .sb-collapse{display:none;}                 /* collapsing is meaningless once it is a drawer */
+  .sb-backdrop{position:fixed;inset:0;background:rgba(16,32,56,.45);z-index:1150;}
+  .sb-mobile-toggle{display:inline-flex !important;}
+
+  .app-topbar{padding:8px 10px;gap:8px;}
+  .app-topbar .ts-kbd{display:none;}          /* a ⌘K hint on a phone is noise */
+  .app-topbar .ts-wrap{max-width:none;}
+  .topbar{padding:8px 10px;gap:8px;}
+
+  /* table-layout:fixed + ellipsis renders every column unreadable at this width. Let the table
+     take its natural width and scroll inside its own container instead of squashing. */
+  .client-list{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .entity-table{table-layout:auto;min-width:680px;}
+
+  .form-card{border-radius:0;}
+  .modal-card{max-height:90vh;padding:16px 14px;}
+
+  /* Touch targets, and 16px inputs: iOS Safari zooms the whole page when focusing an input
+     smaller than 16px, which then leaves the layout scrolled sideways. */
+  .btn{min-height:36px;}
+  .field input,.field select,.field textarea{font-size:16px;}
+}
+
+/* Hidden on desktop; the phone breakpoint above turns it on. */
+.sb-mobile-toggle{
+  display:none;align-items:center;justify-content:center;
+  width:32px;height:32px;flex-shrink:0;padding:0;
+  background:var(--surface-hover);border:1px solid var(--border-strong);border-radius:6px;
+  color:var(--text);font-size:15px;line-height:1;cursor:pointer;
+}
+.sb-mobile-toggle:hover{background:var(--surface);}
