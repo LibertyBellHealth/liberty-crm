@@ -179,6 +179,9 @@ function onSignedIn(account){
       'The account <strong>'+escHtml(email)+'</strong> is not authorized for this application. Signing you out…';
     scr.appendChild(note);
     try{toast('Access denied for '+email,'error');}catch(e){}
+    // §164.308(a)(1)(ii)(D) — an unauthorized access attempt is a reviewable event. It existed
+    // only as a toast that vanished in 3 seconds.
+    try{logActivity('auth','ACCESS DENIED for '+email);}catch(e){}
     setTimeout(function(){msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});},4000);
     return;
   }
@@ -213,6 +216,8 @@ var API_SCOPE='api://'+API_APP_ID+'/user_impersonation';
 function signIn(){msalInstance.loginRedirect({scopes:['openid','profile'],redirectUri:REDIRECT_URI});}
 function signOut(){
   aiTrack('UserSignOut',{});
+  // keepalive on the audit POST lets it survive the logout redirect below.
+  try{logActivity('auth','Signed out');}catch(e){}
   clearCRMStorage();
   clearTimeout(_sessionTimer);clearTimeout(_sessionWarnTimer);
   clearTimeout(_apiTokenTimer);_apiTokenTimer=null;
@@ -221,6 +226,62 @@ function signOut(){
 }
 
 // ── API HELPERS ────────────────────────────────────────────────
+/* ── AUDIT (HIPAA §164.312(b)) ────────────────────────────────────────────────
+   This app recorded NOTHING. Opening a client pulls the DECRYPTED ssn, card, routing and
+   account number into the page, and none of that left a trace of who looked or when.
+   The backend endpoints already existed and were reachable; only the caller was missing.
+
+   scope:'health' is REQUIRED — without it these rows land in Liberty Home Care's AuditLog.
+   The two companies are separate legal entities and their audit trails are separate tables.
+
+   `who` / `actor` are set SERVER-SIDE from the authenticated identity and ignored from the
+   body, so the trail cannot be forged by a caller. */
+function currentUserEmail(){
+  try{
+    var acc=msalInstance&&msalInstance.getAllAccounts&&msalInstance.getAllAccounts();
+    return (acc&&acc.length?acc[0].username:null)||'Unknown';
+  }catch(e){return 'Unknown';}
+}
+// MUST match what documents.js writes for clientType=health:
+//   LTRIM(RTRIM(ISNULL(first_name,'') + ' ' + ISNULL(last_name,'')))
+// client_name is the ONLY lookup key the audit search uses, so a mismatch splits one client's
+// history into two views that can never see each other.
+function _auditName(c){
+  if(!c)return '';
+  return String((c.f_firstName||'')+' '+(c.f_lastName||'')).trim();
+}
+function getAuditLog(){try{return JSON.parse(localStorage.getItem('crm_audit')||'[]');}catch(e){return [];}}
+function _postAuditRecord(body){
+  // A failure here must be VISIBLE. A silently-dropped audit row is worse than a failed save:
+  // the action still happened, and nothing records it.
+  if(!_apiToken){
+    toast('Not signed in — this action was NOT written to the audit log.','error',15000);
+    return;
+  }
+  fetch(API_BASE+'/audit',{
+    method:'POST',headers:apiHeaders(),
+    body:JSON.stringify(Object.assign({scope:'health'},body)),
+    keepalive:true   // survives a sign-out redirect or tab close
+  }).then(function(r){
+    if(!r.ok)toast('Audit log write failed ('+r.status+') — this action was not recorded.','error',15000);
+  }).catch(function(){
+    toast('Audit log write failed — this action was not recorded.','error',15000);
+  });
+}
+function addAuditEntry(clientName,action){
+  var who=currentUserEmail();
+  try{
+    var log=getAuditLog();
+    log.unshift({client:clientName,action:action,who:who,ts:new Date().toLocaleString()});
+    if(log.length>200)log=log.slice(0,200);
+    localStorage.setItem('crm_audit',JSON.stringify(log));
+  }catch(e){}
+  _postAuditRecord({event_type:'audit',client_name:clientName,action:action});
+}
+// Global (non-client) events — exports, sign-in/out, denied access. client_name:'' keeps them
+// out of any one client's tab while still being in the trail.
+function logActivity(type,text){ _postAuditRecord({event_type:type,client_name:'',action:text}); }
+
 function apiHeaders(){var h={'Content-Type':'application/json'};if(_apiToken)h['Authorization']='Bearer '+_apiToken;return h;}
 function authUploadHeaders(){return _apiToken?{'Authorization':'Bearer '+_apiToken}:{};}
 async function refreshApiToken(){
@@ -994,6 +1055,9 @@ function editClient(id){
   var c=clients.find(function(x){return String(x._id)===String(id);});
   if(!c){toast('Could not find client record. Please refresh and try again.','error');return;}
   aiTrack('ClientRecordOpened',{clientId:id}); // no PHI in telemetry — id only
+  // The detail fetch below returns the DECRYPTED ssn, card, routing and account number, so
+  // opening a record IS an ePHI access and has to be recorded as one.
+  addAuditEntry(_auditName(c),'Client record opened');
   trackRecentRecord(id,c);
   // Deep-link URL so bookmarking / copy-link opens this client next time
   try{if(('#/client/'+id)!==window.location.hash)window.location.hash='/client/'+id;}catch(e){}
@@ -1036,6 +1100,60 @@ function editClient(id){
   var actions=formCard.querySelector('.form-actions');
   formCard.insertBefore(docSec,actions);
   loadClientDocs(id);
+
+  var exAudit=document.getElementById('clientAuditSection');
+  if(exAudit)exAudit.remove();
+  var audSec=document.createElement('div');
+  audSec.className='form-section';
+  audSec.id='clientAuditSection';
+  formCard.insertBefore(audSec,actions);
+  loadClientAudit(_auditName(c));
+}
+
+/* Per-client access history. Reads the SAME table the writes above go to, and the same one
+   documents.js already writes Health document access into — so this shows real history
+   immediately, before any of the new write sites have fired even once. */
+function loadClientAudit(clientName){
+  var sec=document.getElementById('clientAuditSection');
+  if(!sec)return;
+  sec.innerHTML='<div class="form-section-title">&#128274; Access History</div>'+
+    '<p style="font-size:11px;color:#999;">Loading…</p>';
+  fetch(API_BASE+'/audit/search',{
+    method:'POST',headers:apiHeaders(),
+    body:JSON.stringify({scope:'health',client:clientName,limit:100})
+  })
+  .then(_apiOk).then(function(r){return r.json();})
+  .then(function(rows){renderClientAudit(clientName,rows||[]);})
+  .catch(function(e){
+    // Same rule as documents: a failed load must not read as "nothing ever happened".
+    sec.innerHTML='<div class="form-section-title">&#128274; Access History</div>'+
+      '<p style="font-size:12px;color:#b00;">Could not load the access history ('+
+      escHtml((e&&e.message)||'error')+'). '+
+      '<a href="#" onclick="loadClientAudit('+escJsAttr(JSON.stringify(clientName))+');return false;">Retry</a></p>';
+  });
+}
+function renderClientAudit(clientName,rows){
+  var sec=document.getElementById('clientAuditSection');if(!sec)return;
+  var h='<div class="form-section-title">&#128274; Access History '+
+        '<span style="font-size:10px;font-weight:normal;color:#999;">(who opened, changed or exported this record)</span></div>';
+  if(!rows.length){
+    h+='<p style="font-size:11px;color:#999;">No recorded activity for this client yet.</p>';
+    sec.innerHTML=h; return;
+  }
+  h+='<div style="max-height:260px;overflow:auto;border:1px solid #eee;border-radius:6px;">';
+  rows.forEach(function(r){
+    var when=r.created_at?new Date(r.created_at).toLocaleString():'';
+    var destructive=/DELETED/.test(r.action||'');
+    h+='<div style="display:flex;gap:10px;padding:6px 10px;border-bottom:1px solid #f5f5f5;font-size:12px;'+
+       (destructive?'background:#fff5f5;':'')+'">'+
+       '<span style="flex:1;'+(destructive?'color:#b00;font-weight:600;':'')+'">'+escHtml(r.action||'')+'</span>'+
+       '<span style="color:#666;white-space:nowrap;">'+escHtml(r.who||'')+'</span>'+
+       '<span style="color:#999;white-space:nowrap;">'+escHtml(when)+'</span>'+
+       '</div>';
+  });
+  h+='</div>';
+  if(rows.length>=100)h+='<p style="font-size:10px;color:#999;margin-top:4px;">Showing the 100 most recent entries.</p>';
+  sec.innerHTML=h;
 }
 function saveClient(onSuccess){
   var data=getFormData();
@@ -1048,6 +1166,7 @@ function saveClient(onSuccess){
     // Keep the token current so a second save in the same sitting isn't rejected as stale.
     if(res&&res.row_version)_rowVersion=res.row_version;
     aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientId:editingId||'new'}); // no PHI in telemetry
+    addAuditEntry(_auditName(data),isNew?'Client record created':'Profile information updated');
     clearFormDirty();
     loadClients();
     if(typeof onSuccess==='function')onSuccess();
@@ -1073,6 +1192,9 @@ function deleteClient(){
   var c=clients.find(function(x){return String(x._id)===String(editingId);});
   var name=c?((c.f_firstName||'')+' '+(c.f_lastName||'')).trim():'this client';
   showConfirm('Delete '+(name||'this client')+'? This cannot be undone.',function(){
+    // Logged BEFORE the delete: afterwards the record is gone and the name no longer resolves,
+    // so the row would be filed under an id nobody can search for.
+    addAuditEntry(name,'CLIENT RECORD DELETED by '+currentUserEmail());
     deleteClientAPI(editingId).then(function(){
       aiTrack('ClientDeleted',{clientId:editingId}); // no PHI in telemetry
       loadClients();showView('clients');
@@ -1781,6 +1903,12 @@ function bulkDelete(){
   var ids=Array.from(document.querySelectorAll('.row-cb:checked')).map(function(cb){return cb.dataset.id;});
   if(!ids.length)return;
   showConfirm('Delete '+ids.length+' client'+(ids.length===1?'':'s')+'? This cannot be undone.',function(){
+    // Per-client rows before the deletes, for the same reason as the single delete.
+    ids.forEach(function(id){
+      var c=clients.find(function(x){return String(x._id)===String(id);});
+      addAuditEntry(_auditName(c),'CLIENT RECORD DELETED by '+currentUserEmail()+' (bulk action)');
+    });
+    logActivity('delete',ids.length+' client records deleted in one bulk action by '+currentUserEmail());
     Promise.all(ids.map(function(id){return deleteClientAPI(id);})).then(function(){loadClients();document.getElementById('bulkDeleteBtn').style.display='none';});
   },{title:'Delete Clients',okText:'Delete '+ids.length});
 }
@@ -1832,6 +1960,10 @@ function runReport(filter,title){
   document.getElementById('reportResult').style.display='block';
 }
 function exportReportExcel(){
+  // §164.528: a bulk extract of client records leaving the application is a disclosure and
+  // needs a record of its own. exportAdvSearchExcel can include routing / account / card
+  // columns, and had no trace at all.
+  try{logActivity('export','report export downloaded by '+currentUserEmail());}catch(e){}
   var rows=[['Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Agent']];
   currentReportData.forEach(function(c){rows.push([(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_agent||'']);});
   dlXLSX(rows,'report.xlsx');
@@ -2423,6 +2555,10 @@ function removeProjectCodeSetting(i){
   },{title:'Remove',okText:'Remove'});
 }
 function exportFullBackup(){
+  // §164.528: a bulk extract of client records leaving the application is a disclosure and
+  // needs a record of its own. exportAdvSearchExcel can include routing / account / card
+  // columns, and had no trace at all.
+  try{logActivity('export','full backup export downloaded by '+currentUserEmail());}catch(e){}
   if(!clients.length){toast('No clients to export.','error');return;}
   var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Carrier','Premium','Subsidy','Total Monthly','App Fee','Agent','Lead Source','Renewed','State','City','ZIP','County','Medicare','Medicaid','Notes','App Date']];
   clients.forEach(function(c){
@@ -2447,7 +2583,16 @@ function loadClientDocs(clientId){
   fetch(API_BASE+'/documents?clientType=health&clientId='+clientId,{headers:apiHeaders()})
   .then(function(r){return r.json();})
   .then(function(docs){_clientDocs=docs||[];renderClientDocs(clientId,docs);})
-  .catch(function(){_clientDocs=[];renderClientDocs(clientId,[]);});
+  .catch(function(){
+    // A FAILED load must never render as "no documents yet" — indistinguishable from genuinely
+    // empty, and the agent then re-uploads a document that is already there.
+    _clientDocs=[];
+    var sec=document.getElementById('clientDocsSection');
+    if(sec)sec.innerHTML='<div class="form-section-title">&#128196; Client Documents</div>'+
+      '<p style="font-size:12px;color:#b00;">Could not load documents. '+
+      '<a href="#" onclick="loadClientDocs(\''+String(clientId).replace(/[^A-Za-z0-9_-]/g,'')+'\');return false;">Retry</a> '+
+      '— do not re-upload until this loads, the files may already be here.</p>';
+  });
 }
 function renderClientDocs(clientId,docs){
   var sec=document.getElementById('clientDocsSection');if(!sec)return;
@@ -2588,6 +2733,10 @@ function advColumnsResetDefault(){REPORT_FIELDS.forEach(function(f){var el=docum
 document.addEventListener('change',function(e){if(e.target&&e.target.id&&e.target.id.indexOf('rpt_')===0)saveReportColumns();});
 
 function exportAdvSearchExcel(){
+  // §164.528: a bulk extract of client records leaving the application is a disclosure and
+  // needs a record of its own. exportAdvSearchExcel can include routing / account / card
+  // columns, and had no trace at all.
+  try{logActivity('export','advanced-search export downloaded by '+currentUserEmail());}catch(e){}
   if(!_advSearchResults.length)return;
   var chosen=REPORT_FIELDS.filter(function(f){var el=document.getElementById('rpt_'+f[0]);return el?el.checked:f[2];});
   if(!chosen.length){toast('Select at least one column in "Columns to Include"','error');return;}
