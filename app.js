@@ -40,13 +40,30 @@ function escJsAttr(v){
   return escHtml(String(v==null?'':v).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 }
 
+// Telemetry leaves our control, so PHI must never reach it. Every call site here passes ids
+// only — but that is discipline, not enforcement, and one careless aiTrack('X',{clientName:…})
+// regresses it silently. Drop any property whose KEY looks like PHI, whatever its value.
+// `user` is deliberately exempt: it is workforce identity (also set via
+// setAuthenticatedUserContext) and is what makes an event attributable.
+var _AI_PHI_KEY = /name|client|carrier|plan|email|phone|address|street|city|zip|county|dob|ssn|medicare|medicaid|routing|account|card|premium|income|referrer|employer|notes|file/i;
+function _aiScrub(props) {
+  var out = {};
+  if (!props) return out;
+  try {
+    for (var k in props) {
+      if (!Object.prototype.hasOwnProperty.call(props, k)) continue;
+      if (!_AI_PHI_KEY.test(k)) out[k] = props[k];
+    }
+  } catch (e) { return {}; }
+  return out;
+}
 function aiTrack(name, props) {
   try {
     var ai = window.appInsights;
     if (ai && ai.trackEvent) {
       var acc = msalInstance && msalInstance.getAllAccounts && msalInstance.getAllAccounts();
       var user = (acc && acc.length) ? acc[0].username : 'unknown';
-      ai.trackEvent({ name: name }, Object.assign({ user: user, site: 'crm' }, props || {}));
+      ai.trackEvent({ name: name }, Object.assign({ user: user, site: 'crm' }, _aiScrub(props)));
     }
   } catch (e) { /* silent */ }
 }
@@ -80,15 +97,36 @@ function resetSessionTimer(){
   document.addEventListener(ev,resetSessionTimer,{passive:true,capture:true});
 });
 
+// Wipe every crm_* / crmCarriers / lch_* key EXCEPT an explicit whitelist of non-PHI
+// *preferences*, so a key added later is covered automatically instead of silently surviving
+// sign-out. The previous fixed list was already wrong: it named 'crm_carriers' and
+// 'crm_settings', NEITHER of which is ever written, while the real key `crmCarriers` (written
+// at saveCarriers) survived — and carrier names are operator-editable free text. It also
+// missed crm_report_columns, crm_default_agent and the crm_carriers_seed_* flags.
+// Home Care hit the same bug and replaced the same pattern; see its clearPHIFromStorage.
+var _KEEP_ON_SIGNOUT = /(_col_widths|_page_size|_collapsed)$|^crm_display_name$/;
 function clearCRMStorage() {
-  ['crm_preview','crm_carriers','crm_settings','crm_custom_meds',
-   'crm_agents','crm_lead_sources','crm_renewals','crm_plan_types',
-   'crm_project_codes','crm_display_name','crm_todos','crm_recent'].forEach(function(k){
-    localStorage.removeItem(k);
-  });
+  try {
+    Object.keys(localStorage)
+      .filter(function(k){
+        return (k.indexOf('crm_') === 0 || k.indexOf('crmCarriers') === 0 || k.indexOf('lch_') === 0)
+               && !_KEEP_ON_SIGNOUT.test(k);
+      })
+      .forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
+  } catch (e) { /* storage unavailable — nothing to wipe */ }
+  // PHI also sits in MEMORY. `clients` holds the whole roster (names, DOB, addresses, last-4),
+  // and the open form holds DECRYPTED ssn / card / routing / account. Sign-out today navigates
+  // away via logoutRedirect, which takes both with it — but that is incidental, not a control,
+  // and it does not hold if the redirect is slow or cancelled.
+  try { clients = []; carriers = []; } catch (e) {}
+  try {
+    document.querySelectorAll('#viewForm input, #viewForm textarea').forEach(function(el){
+      if (el.type !== 'checkbox' && el.type !== 'radio' && el.type !== 'button') el.value = '';
+    });
+  } catch (e) {}
 }
 
-var msalInstance=null,clients=[],editingId=null,csvHeaders=[],csvData=[],currentReportData=[],carriers=[];
+var msalInstance=null,_apiTokenTimer=null,clients=[],editingId=null,csvHeaders=[],csvData=[],currentReportData=[],carriers=[];
 
 // ── MSAL authentication ────────────────────────────────────────
 function initMSAL(){
@@ -133,7 +171,7 @@ function onSignedIn(account){
     note.id='authDeniedNote';
     note.style.cssText='max-width:420px;text-align:center;padding:16px 20px;background:rgba(160,32,32,0.15);border:1px solid rgba(160,32,32,0.4);border-radius:8px;color:#fff;font-size:13px;line-height:1.6;';
     note.innerHTML='<div style="color:#ff8080;font-weight:700;font-size:14px;margin-bottom:6px;">Access denied</div>'+
-      'The account <strong>'+email+'</strong> is not authorized for this application. Signing you out…';
+      'The account <strong>'+escHtml(email)+'</strong> is not authorized for this application. Signing you out…';
     scr.appendChild(note);
     try{toast('Access denied for '+email,'error');}catch(e){}
     setTimeout(function(){msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});},4000);
@@ -172,6 +210,7 @@ function signOut(){
   aiTrack('UserSignOut',{});
   clearCRMStorage();
   clearTimeout(_sessionTimer);clearTimeout(_sessionWarnTimer);
+  clearTimeout(_apiTokenTimer);_apiTokenTimer=null;
   _apiToken=null;
   msalInstance.logoutRedirect({redirectUri:REDIRECT_URI});
 }
@@ -186,14 +225,19 @@ async function refreshApiToken(){
     var res=await msalInstance.acquireTokenSilent({scopes:[API_SCOPE],account:accounts[0]});
     _apiToken=res.accessToken;
     var ttl=res.expiresOn?(res.expiresOn.getTime()-Date.now()-600000):3000000;
-    setTimeout(refreshApiToken,Math.max(ttl,60000));
+    // Keep the handle: an uncancelled refresh timer silently re-acquires a token after
+    // sign-out, and resetSessionTimer (gated on _apiToken) then re-arms — so the HIPAA idle
+    // sign-out would not actually hold if the logout redirect were slow or cancelled.
+    clearTimeout(_apiTokenTimer);
+    _apiTokenTimer=setTimeout(refreshApiToken,Math.max(ttl,60000));
   }catch(e){
     console.warn('API token silent refresh failed, opening consent popup:',e);
     try{
       var r2=await msalInstance.acquireTokenPopup({scopes:[API_SCOPE]});
       _apiToken=r2.accessToken;
       var ttl2=r2.expiresOn?(r2.expiresOn.getTime()-Date.now()-600000):3000000;
-      setTimeout(refreshApiToken,Math.max(ttl2,60000));
+      clearTimeout(_apiTokenTimer);
+      _apiTokenTimer=setTimeout(refreshApiToken,Math.max(ttl2,60000));
     }catch(e2){console.warn('API token popup also failed:',e2);}
   }
 }
@@ -1364,7 +1408,12 @@ function carrierAC(el){
     return ap-bp;
   });
   list.innerHTML=matches.map(function(c){
-    return '<div onmousedown="document.getElementById(\'f_planCarrier\').value=\''+(c.name||'').replace(/'/g,"\\'")+'\';document.getElementById(\'carrierACList\').style.display=\'none\';markFormDirty();">'+(c.name||'')+'</div>';
+    // STORED XSS: carrier names are operator-editable free text persisted in localStorage, and
+    // both the element text and the JS-string attribute were unescaped. The ad-hoc
+    // .replace(/'/g,"\\'") escaped neither a backslash nor '<' nor '"'. escJsAttr handles the
+    // attribute case correctly (the HTML parser decodes entities BEFORE the JS runs, which is
+    // why escHtml alone is not enough there). Matches referrerAC, which already did this right.
+    return '<div onmousedown="document.getElementById(\'f_planCarrier\').value=\''+escJsAttr(c.name||'')+'\';document.getElementById(\'carrierACList\').style.display=\'none\';markFormDirty();">'+escHtml(c.name||'')+'</div>';
   }).join('');
   list.style.display='block';
 }
@@ -1887,7 +1936,7 @@ function renderQuickSearch(){
   var results=_searchClients(q);
   if(_quickSearchIdx>=results.length)_quickSearchIdx=Math.max(0,results.length-1);
   if(!results.length){
-    box.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">'+(q.trim()?'No clients match "'+q.trim()+'"':'Start typing to search '+(clients.length||0)+' clients')+'</div>';
+    box.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">'+(q.trim()?'No clients match "'+escHtml(q.trim())+'"':'Start typing to search '+(clients.length||0)+' clients')+'</div>';
     return;
   }
   box.innerHTML=_searchRowsHtml(results,_quickSearchIdx,'_qsHover','pickQuickSearch');
@@ -1917,7 +1966,7 @@ function renderTopSearch(){
   box.style.display='block';
   box.innerHTML=results.length
     ? _searchRowsHtml(results,_topSearchIdx,'_tsHover','pickTopSearch')
-    : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No clients match "'+q+'"</div>';
+    : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No clients match "'+escHtml(q)+'"</div>';
 }
 function pickTopSearch(){
   var inp=document.getElementById('topSearchInput');
@@ -2634,7 +2683,7 @@ function renderClientTodos(clientId){
       var row=document.createElement('div');
       row.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:12px;';
       row.innerHTML='<input type="checkbox" '+(t.done?'checked':'')+' onchange="toggleTodo('+t.id+');renderClientTodos(\''+clientId+'\')" style="cursor:pointer;">'+
-        '<span style="flex:1;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+(t.task)+'</span>'+
+        '<span style="flex:1;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+escHtml(t.task)+'</span>'+
         (t.due?'<span style="font-size:10px;color:'+(overdue?'#dc3545':'#666')+';">'+t.due+'</span>':'')+
         (t.priority==='high'?'<span style="font-size:10px;color:#dc3545;font-weight:bold;">High</span>':'')+
         '<button class="btn btn-red" style="padding:1px 5px;font-size:10px;" onclick="deleteTodo('+t.id+');renderClientTodos(\''+clientId+'\')">✕</button>';
@@ -2696,7 +2745,10 @@ function renderSettingsList(arr,containerId,removeFunc){
   arr.forEach(function(item,i){
     var div=document.createElement('div');
     div.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f0;';
-    div.innerHTML='<span style="flex:1;font-size:12px;">'+item+'</span>'+
+    // STORED XSS: `item` is operator-typed free text (agents, lead sources, custom meds,
+    // renewal statuses, plan types, project codes) persisted to localStorage and re-rendered
+    // on every Settings visit. Six entry points through this one function.
+    div.innerHTML='<span style="flex:1;font-size:12px;">'+escHtml(item)+'</span>'+
       '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="'+removeFunc+'('+i+')">Remove</button>';
     el.appendChild(div);
   });
