@@ -107,9 +107,17 @@ function resetSessionTimer(){
 // sign-out. The previous fixed list was already wrong: it named 'crm_carriers' and
 // 'crm_settings', NEITHER of which is ever written, while the real key `crmCarriers` (written
 // at saveCarriers) survived — and carrier names are operator-editable free text. It also
-// missed crm_report_columns, crm_default_agent and the crm_carriers_seed_* flags.
+// missed crm_default_agent and the crm_carriers_seed_* flags. crm_report_columns is a list of
+// COLUMN NAMES with no client data in it, and it has no server copy — it belongs with the other
+// per-device preferences, not in the wipe. Everything else here is mirrored to AppSettings and
+// comes back from the server at the next sign-in.
 // Home Care hit the same bug and replaced the same pattern; see its clearPHIFromStorage.
-var _KEEP_ON_SIGNOUT = /(_col_widths|_page_size|_collapsed)$|^crm_display_name$/;
+// crm_todos is a TEMPORARY exception and the only one that is not a preference. It is the legacy
+// task list, and until migrateLegacyTodos has handed it to the server it is the ONLY copy — wiping
+// it here would silently destroy the agent's tasks on the first sign-out or tab close after this
+// change. Nothing writes the key any more, and the migration deletes it the moment the server
+// accepts every row, so it disappears on its own at the next successful sign-in.
+var _KEEP_ON_SIGNOUT = /(_col_widths|_page_size|_collapsed)$|^crm_display_name$|^crm_report_columns$|^crm_todos$/;
 function clearCRMStorage() {
   try {
     Object.keys(localStorage)
@@ -193,7 +201,10 @@ function onSignedIn(account){
   // errors / usage to a specific person when debugging.
   try{window._aiUser=email;if(window.appInsights&&window.appInsights.setAuthenticatedUserContext)window.appInsights.setAuthenticatedUserContext(email);}catch(e){}
   refreshApiToken().then(function(){
-    try{loadSettingsAPI();}catch(e){} resetSessionTimer(); loadClients(); routeFromHash(); });
+    try{loadSettingsAPI();}catch(e){} resetSessionTimer(); loadClients(); routeFromHash();
+    // Migrate first, THEN load: anything still on this device has to reach the server before the
+    // server's list replaces the in-memory one, or it is lost.
+    try{migrateLegacyTodos().then(loadTasksAPI);}catch(e){} });
 }
 /* Hash-based deep links so URLs like /#/client/<id> open that client directly.
    Enables bookmarking and sharing a link to a specific record. */
@@ -1504,6 +1515,15 @@ function guardUnsavedChanges(proceed){
 window.addEventListener('beforeunload',function(e){
   if(_formDirty){e.preventDefault();e.returnValue='';}
 });
+/* HIPAA: closing the tab is the common way this app is left — far more common than pressing Sign
+   out — and it used to leave everything clearCRMStorage clears sitting in the browser profile
+   until the next explicit sign-out. Internal navigation is hash-based and does not fire pagehide,
+   so this only runs on a real unload. Skipped when the page is going into bfcache, since it may
+   be restored. Everything here is re-fetched from the server on the next visit. */
+window.addEventListener('pagehide',function(e){
+  if(e&&e.persisted)return;
+  try{clearCRMStorage();}catch(_){}
+});
 /* Row-removal helper used by generated rows so onclick attributes stay short */
 function confirmRemoveRow(el,message,after){
   showConfirm(message||'Remove this row?',function(){
@@ -2538,12 +2558,19 @@ function saveTodo(){
   var priority=document.getElementById('todoPriorityInput').value;
   var clientId=document.getElementById('todoClientId').value||'';
   // clientName deliberately NOT persisted — resolved from `clients` in renderTodos
-  _todos.unshift({id:Date.now(),task:task,due:due,priority:priority,done:false,created:new Date().toISOString(),clientId:clientId});
-  saveTodos();
+  var t={id:Date.now(),task:task,due:due,priority:priority,done:false,created:new Date().toISOString(),clientId:clientId};
+  _todos.unshift(t);
   document.getElementById('todoAddSection').style.display='none';
   document.getElementById('todoClientInput').value='';
   document.getElementById('todoClientId').value='';
   renderTodos();
+  // Show it immediately, then tell the truth about whether it actually saved. Nothing is kept on
+  // this device any more, so a task that never reached the server is gone at the next load —
+  // the agent has to be told that while the text is still on screen to re-enter.
+  saveTaskAPI(t).then(function(){renderTodos();}).catch(function(e){
+    t._unsaved=true;renderTodos();
+    toast('Task NOT saved: '+((e&&e.message)||e)+'. It will disappear when you reload — please re-enter it.','error',15000);
+  });
 }
 
 // ===================== ADVANCED SEARCH - add create date filter =====================
@@ -2925,18 +2952,95 @@ var _todoFilter='all';
 /* Same PHI rule as recent-records: only clientId is persisted, the name is
    resolved from the in-memory clients array at render time. Migration below
    strips clientName from any entry saved before this fix. */
-function loadTodos(){
-  try{
-    _todos=JSON.parse(localStorage.getItem('crm_todos')||'[]');
-    var hadPHI=_todos.some(function(t){return t&&t.clientName;});
-    if(hadPHI){
-      _todos.forEach(function(t){if(t)delete t.clientName;});
-      saveTodos(); // re-persist immediately so the old names are gone from disk
-    }
-  }catch(e){_todos=[];}
+/* ── TASKS API (source='health') ──────────────────────────────────────────────
+   Tasks used to live in localStorage and nowhere else, which was wrong twice over.
+
+   1. Task text is operator free-text — "call Jane about her Medicaid renewal" — so the list
+      was PHI sitting at rest in the browser profile, the same rule crm_recent, crm_todos'
+      clientName and the audit mirror were all already fixed for.
+   2. clearCRMStorage wipes every crm_* key on sign-out, so the list was DESTROYED on every
+      sign-out, and existed on one device only.
+
+   The Tasks table has been there the whole time, discriminated by `source` and authorized per
+   entity (a Home Care user cannot read, edit, move or delete a health row). Home Care keeps a
+   localStorage cache on top of it; this app deliberately does not — the roster is already
+   memory-only here, and tasks now follow it.
+
+   `client_name` carries the client's ID for health rows, never the name: the UI resolves names
+   from the in-memory roster at render time, and nothing needs the name in the column. */
+function _taskToBody(t){
+  return {
+    id:t.dbId||undefined,
+    text:t.task||'',
+    done:t.done?1:0,
+    due:t.due||null,
+    client:t.clientId?String(t.clientId):'',   // ID, not name — see above
+    priority:t.priority||'normal',
+    source:'health'
+  };
 }
-function saveTodos(){localStorage.setItem('crm_todos',JSON.stringify(_todos));}
-loadTodos();
+function saveTaskAPI(t){
+  return fetch(API_BASE+'/tasks',{method:'POST',headers:apiHeaders(),body:JSON.stringify(_taskToBody(t))})
+    .then(_apiOk).then(function(r){return r.json();})
+    .then(function(res){
+      if(!t.dbId&&res&&res.id)t.dbId=res.id;
+      t._unsaved=false;
+      return res;
+    });
+}
+function deleteTaskAPI(dbId){
+  if(!dbId)return Promise.resolve();
+  return fetch(API_BASE+'/tasks/'+encodeURIComponent(dbId),{method:'DELETE',headers:apiHeaders()}).then(_apiOk);
+}
+function loadTasksAPI(){
+  if(!_apiToken)return Promise.resolve();
+  return fetch(API_BASE+'/tasks?source=health',{headers:apiHeaders()})
+    .then(_apiOk).then(function(r){return r.json();})
+    .then(function(rows){
+      _todos=(Array.isArray(rows)?rows:[]).map(function(t){
+        return {
+          id:t.id, dbId:t.id,
+          task:t.task_text||'',
+          done:!!t.done,
+          due:t.due_date?String(t.due_date).split('T')[0]:'',
+          priority:t.priority||'normal',
+          clientId:t.client_name||'',
+          created:t.created_at||''
+        };
+      });
+      // Newest first, matching the order the unshift-based local list produced.
+      _todos.sort(function(a,b){return (b.dbId||0)-(a.dbId||0);});
+      renderTodos();
+    })
+    .catch(function(e){
+      // Never render an empty task list on a failed load — indistinguishable from having none.
+      toast('Could not load tasks: '+((e&&e.message)||e)+'. This list may be incomplete.','error',10000);
+    });
+}
+/* One-time move of whatever is still in localStorage on this device up to the server, BEFORE the
+   key is dropped. Without this, shipping the change would delete every task the agent had. The key
+   is only removed once every row it held has been accepted, so a failed migration retries next
+   sign-in rather than losing the list. */
+function migrateLegacyTodos(){
+  var legacy=[];
+  try{legacy=JSON.parse(localStorage.getItem('crm_todos')||'[]');}catch(e){legacy=[];}
+  if(!Array.isArray(legacy)||!legacy.length){
+    try{localStorage.removeItem('crm_todos');}catch(e){}
+    return Promise.resolve();
+  }
+  return Promise.all(legacy.map(function(t){
+    if(!t)return Promise.resolve(true);
+    // Drop any dbId a legacy row somehow carries — these have never been on the server.
+    return saveTaskAPI({task:t.task,done:t.done,due:t.due,priority:t.priority,clientId:t.clientId})
+      .then(function(){return true;}).catch(function(){return false;});
+  })).then(function(results){
+    if(results.every(Boolean)){
+      try{localStorage.removeItem('crm_todos');}catch(e){}
+    } else {
+      toast('Some tasks could not be moved to the server and are still only on this device. They will retry at next sign-in.','error',15000);
+    }
+  });
+}
 function openAddTodo(){
   var s=document.getElementById('todoAddSection');
   s.style.display='block';
@@ -2949,21 +3053,44 @@ function openAddTodo(){
 }
 function toggleTodo(id){
   var t=_todos.find(function(x){return x.id===id;});
-  if(t)t.done=!t.done;
-  saveTodos();renderTodos();
+  if(!t)return;
+  t.done=!t.done;
+  renderTodos();
+  saveTaskAPI(t).catch(function(e){
+    // Put the tick back. A checkbox that stays ticked after a failed save is a lie the agent
+    // acts on — the task reappears as outstanding at the next load with no explanation.
+    t.done=!t.done;renderTodos();
+    toast('Could not update that task: '+((e&&e.message)||e),'error',10000);
+  });
 }
 function deleteTodo(id){
+  var t=_todos.find(function(x){return x.id===id;});
+  if(!t)return;
   showConfirm('Delete this task?',function(){
-    _todos=_todos.filter(function(x){return x.id!==id;});
-    saveTodos();renderTodos();
+    // Remove locally only once the server has accepted it, or the task returns at the next load.
+    deleteTaskAPI(t.dbId).then(function(){
+      _todos=_todos.filter(function(x){return x!==t;});
+      renderTodos();
+    }).catch(function(e){
+      toast('Could not delete that task: '+((e&&e.message)||e)+' — it is still there.','error',10000);
+    });
   },{title:'Delete Task',okText:'Delete'});
 }
 function clearCompletedTodos(){
-  var done=_todos.filter(function(x){return x.done;}).length;
-  if(!done){toast('No completed tasks to clear.','info');return;}
-  showConfirm('Remove '+done+' completed task'+(done!==1?'s':'')+'?',function(){
-    _todos=_todos.filter(function(x){return !x.done;});
-    saveTodos();renderTodos();
+  // Pin the actual tasks now, not a count to re-derive after the dialog: the list can change
+  // while it is open, and this used to re-filter _todos at OK-press time.
+  var doneTasks=_todos.filter(function(x){return x.done;});
+  if(!doneTasks.length){toast('No completed tasks to clear.','info');return;}
+  showConfirm('Remove '+doneTasks.length+' completed task'+(doneTasks.length!==1?'s':'')+'?',function(){
+    Promise.all(doneTasks.map(function(t){
+      return deleteTaskAPI(t.dbId).then(function(){return t;}).catch(function(){return null;});
+    })).then(function(results){
+      var removed=results.filter(Boolean);
+      _todos=_todos.filter(function(x){return removed.indexOf(x)<0;});
+      renderTodos();
+      var failed=results.length-removed.length;
+      if(failed)toast(failed+' task'+(failed===1?'':'s')+' could not be removed and are still here.','error',10000);
+    });
   },{title:'Clear Completed',okText:'Remove'});
 }
 function setTodoFilter(f){
@@ -3004,10 +3131,13 @@ function renderTodos(){
       var tcName=tc?(((tc.f_firstName||'')+' '+(tc.f_lastName||'')).trim()||'Unnamed'):'';
       if(tcName)clientLink='<span onclick="editClient(\''+escJsAttr(t.clientId)+'\')" style="font-size:10px;background:#dbeafe;color:#1a3a5c;padding:2px 8px;border-radius:10px;cursor:pointer;margin-left:6px;font-weight:600;" title="Open client record">&#128101; '+escHtml(tcName)+'</span>';
     }
+    // A task the server never accepted is not coming back after a reload. Say so on the row
+    // itself, not only in a toast that has already gone.
+    var unsavedTag=t._unsaved?'<span style="font-size:10px;background:#fde2e2;color:#a01c1c;padding:2px 8px;border-radius:10px;margin-left:6px;font-weight:600;" title="This task was not saved to the server and will disappear when you reload.">NOT SAVED</span>':'';
     div.innerHTML=
       '<input type="checkbox" '+(t.done?'checked':'')+' style="width:16px;height:16px;cursor:pointer;flex-shrink:0;" onchange="toggleTodo('+t.id+')">'+
       '<div style="flex:1;">'+
-        '<span style="font-size:13px;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+escHtml(t.task)+'</span>'+dueStr+clientLink+
+        '<span style="font-size:13px;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+escHtml(t.task)+'</span>'+dueStr+clientLink+unsavedTag+
       '</div>'+
       '<span style="font-size:10px;color:'+prioColor+';font-weight:600;white-space:nowrap;">'+prioLabel+'</span>'+
       '<button class="btn btn-red" style="padding:2px 7px;font-size:11px;" onclick="deleteTodo('+t.id+')">✕</button>';
