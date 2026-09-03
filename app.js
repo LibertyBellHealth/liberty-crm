@@ -321,8 +321,23 @@ function _syncedSetItem(k,v){
   clearTimeout(_settingsPushTimer);
   _settingsPushTimer=setTimeout(_pushSettings,800);
 }
+/* True once the server's copy has been read at least once this session — including a read that
+   came back empty, which is a legitimate first run. Until then this device's settings are NOT
+   authoritative and must never be pushed.
+
+   This matters because the sign-out / tab-close wipe clears every crm_* key, so a session starts
+   with nothing and depends on loadSettingsAPI to refill it. If that fetch fails, loadSettings()
+   has already fallen back to hardcoded defaults and carriers to an empty array — and the old
+   comment on the catch below, "the local values stand, and a later write pushes them", then meant
+   pushing DEFAULTS over the real list. One added agent would have replaced the server's agents
+   with the two built-ins plus that one; one added carrier would have replaced every carrier. */
+var _settingsLoaded=false;
 function _pushSettings(){
   if(!_apiToken)return;
+  if(!_settingsLoaded){
+    toast('Settings are not syncing — the saved list could not be loaded. This change stays on this device only. Reload to try again.','error',15000);
+    return;
+  }
   var body={scope:'health'};
   _SYNCED_SETTINGS.forEach(function(e){
     var raw=localStorage.getItem(e[0]);
@@ -344,6 +359,10 @@ function loadSettingsAPI(){
   return fetch(API_BASE+'/settings?scope=health',{headers:apiHeaders()})
     .then(_apiOk).then(function(r){return r.json();})
     .then(function(remote){
+      // The read succeeded, so this device is reconciled with the server and may push again.
+      // Set before the early returns below: "the server has nothing yet" is a successful read on
+      // a first run, and pushing local values up from there is exactly right.
+      _settingsLoaded=true;
       // A local save is in flight — applying the server's older copy now would revert what the
       // user just typed. Home Care hit exactly this.
       if(_settingsPushInFlight)return;
@@ -362,7 +381,12 @@ function loadSettingsAPI(){
       try{applySettingsToDropdowns();}catch(err){}
       try{if(document.getElementById('viewSettings').style.display!=='none')renderSettings();}catch(err){}
     })
-    .catch(function(){ /* first run or offline — the local values stand, and a later write pushes them */ });
+    .catch(function(e){
+      // Deliberately leaves _settingsLoaded false, so nothing this device holds can overwrite the
+      // server copy it never managed to read. Loud, because the lists on screen are now defaults
+      // rather than this agency's real ones, and that is not otherwise obvious.
+      toast('Could not load your saved settings ('+((e&&e.message)||'network error')+'). Agent, carrier and plan lists may be incomplete, and changes will not sync until you reload.','error',15000);
+    });
 }
 
 function apiHeaders(){var h={'Content-Type':'application/json'};if(_apiToken)h['Authorization']='Bearer '+_apiToken;return h;}
