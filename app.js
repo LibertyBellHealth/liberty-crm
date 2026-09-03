@@ -2143,22 +2143,80 @@ var CRM_IMPORT_FIELDS=[
   {key:'f_healthEffective',label:'Health Effective'},{key:'f_totalMonthly',label:'Total Monthly'},
   {key:'f_medicareNum',label:'Medicare #'},{key:'f_medicaid',label:'Medicaid #'},{key:'f_notes',label:'Notes'}
 ];
+/* Split a CSV into headers + row objects, honouring quoted fields.
+
+   The old parser was `line.split(',')` after `text.split('\n')`, with every quote character
+   stripped afterwards. Any quoted field containing a comma — "123 Main St, Apt 4", or a notes
+   field with a comma in it, both of which any real export produces — shifted EVERY column after
+   it by one. The address became "123 Main St" and "Apt 4" was written into the next column, so
+   an import silently wrote wrong values into patient records with no error anywhere.
+
+   Handles: quoted commas, "" escapes, newlines inside quoted fields, CRLF and Excel's BOM. */
+function parseCSV(text){
+  text=String(text==null?'':text);
+  var rows=[],row=[],field='',inQuotes=false;
+  for(var i=0;i<text.length;i++){
+    var ch=text.charAt(i);
+    if(inQuotes){
+      if(ch!=='"'){field+=ch;continue;}          // \r and \n inside quotes are DATA, not structure
+      if(text.charAt(i+1)==='"'){field+='"';i++;} // "" is a literal quote
+      else inQuotes=false;
+    } else if(ch==='"'){inQuotes=true;}
+    else if(ch===','){row.push(field);field='';}
+    else if(ch==='\n'){row.push(field);field='';rows.push(row);row=[];}
+    else if(ch!=='\r'){field+=ch;}               // bare \r only ever precedes the \n
+  }
+  row.push(field);rows.push(row);
+  // trim() also removes Excel's leading BOM (U+FEFF is whitespace to trim), which is why there
+  // is no separate BOM strip — without this the first header name would be '\uFEFFFirst Name'
+  // and every lookup against it would miss.
+  rows=rows.map(function(r){return r.map(function(v){return v.trim();});})
+           .filter(function(r){return r.some(function(v){return v!=='';});});
+  if(!rows.length)return {headers:[],rows:[]};
+  var headers=rows[0];
+  return {
+    headers:headers,
+    rows:rows.slice(1).map(function(vals){
+      var obj={};headers.forEach(function(h,i){obj[h]=vals[i]||'';});return obj;
+    })
+  };
+}
+/* Column-mapping table. The option labels are the CSV's OWN header names — text from a file
+   someone was sent — and they used to be concatenated into markup raw, so a header like
+   <img src=x onerror=...> became a real element. Built as nodes now; nothing is parsed as HTML. */
+function renderCsvMapping(headers){
+  var tbody=document.getElementById('mappingBody');if(!tbody)return;
+  tbody.innerHTML='';
+  CRM_IMPORT_FIELDS.forEach(function(f){
+    var tr=document.createElement('tr');
+    var labelTd=document.createElement('td');labelTd.textContent=f.label;
+    var selTd=document.createElement('td');
+    var sel=document.createElement('select');sel.id='map_'+f.key;
+    var skip=document.createElement('option');skip.value='';skip.textContent='-- Skip --';
+    sel.appendChild(skip);
+    var want=f.label.toLowerCase().replace(/[^a-z]/g,'').substr(0,4);
+    (headers||[]).forEach(function(h){
+      var o=document.createElement('option');
+      o.value=h;o.textContent=h;
+      if(String(h).toLowerCase().replace(/[^a-z]/g,'').includes(want))o.selected=true;
+      sel.appendChild(o);
+    });
+    selTd.appendChild(sel);
+    tr.appendChild(labelTd);tr.appendChild(selTd);
+    tbody.appendChild(tr);
+  });
+}
 function handleCSV(event){
   var file=event.target.files[0];if(!file)return;
   var reader=new FileReader();
   reader.onload=function(e){
-    var lines=e.target.result.split('\n').filter(function(l){return l.trim();});
-    csvHeaders=lines[0].split(',').map(function(h){return h.trim().replace(/"/g,'');});
-    csvData=lines.slice(1).map(function(line){var vals=line.split(',').map(function(v){return v.trim().replace(/"/g,'');});var obj={};csvHeaders.forEach(function(h,i){obj[h]=vals[i]||'';});return obj;});
-    var tbody=document.getElementById('mappingBody');tbody.innerHTML='';
-    CRM_IMPORT_FIELDS.forEach(function(f){
-      var tr=document.createElement('tr');
-      var opts='<option value="">-- Skip --</option>'+csvHeaders.map(function(h){var match=h.toLowerCase().replace(/[^a-z]/g,'').includes(f.label.toLowerCase().replace(/[^a-z]/g,'').substr(0,4));return '<option value="'+h+'" '+(match?'selected':'')+'>'+h+'</option>';}).join('');
-      tr.innerHTML='<td>'+f.label+'</td><td><select id="map_'+f.key+'">'+opts+'</select></td>';
-      tbody.appendChild(tr);
-    });
+    var parsed=parseCSV(e.target.result);
+    csvHeaders=parsed.headers;csvData=parsed.rows;
+    if(!csvHeaders.length){toast('That file had no readable rows.','error');return;}
+    renderCsvMapping(csvHeaders);
     document.getElementById('mappingSection').style.display='block';
   };
+  reader.onerror=function(){toast('Could not read that file.','error');};
   reader.readAsText(file);
 }
 function importClients(){
