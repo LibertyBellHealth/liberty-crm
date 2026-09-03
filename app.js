@@ -251,7 +251,13 @@ function _auditName(c){
   if(!c)return '';
   return String((c.f_firstName||'')+' '+(c.f_lastName||'')).trim();
 }
-function getAuditLog(){try{return JSON.parse(localStorage.getItem('crm_audit')||'[]');}catch(e){return [];}}
+/* The audit trail lives SERVER-SIDE (POST /audit, read back by loadClientAudit). There used to be
+   a parallel localStorage mirror here holding the patient name on 200 entries deep. Nothing ever
+   read it — loadClientAudit has always gone to the API — so it was pure standing PHI on the disk of
+   every browser that had ever opened a record, in plain violation of the no-PHI-in-localStorage
+   rule that crm_recent and crm_todos were both already fixed for. Removing the writes does nothing
+   for the browsers that already have months of it, so purge on startup too. */
+function purgeLegacyAuditLog(){try{localStorage.removeItem('crm_audit');}catch(e){}}
 function _postAuditRecord(body){
   // A failure here must be VISIBLE. A silently-dropped audit row is worse than a failed save:
   // the action still happened, and nothing records it.
@@ -270,13 +276,6 @@ function _postAuditRecord(body){
   });
 }
 function addAuditEntry(clientName,action){
-  var who=currentUserEmail();
-  try{
-    var log=getAuditLog();
-    log.unshift({client:clientName,action:action,who:who,ts:new Date().toLocaleString()});
-    if(log.length>200)log=log.slice(0,200);
-    localStorage.setItem('crm_audit',JSON.stringify(log));
-  }catch(e){}
   _postAuditRecord({event_type:'audit',client_name:clientName,action:action});
 }
 // Global (non-client) events — exports, sign-in/out, denied access. client_name:'' keeps them
@@ -478,6 +477,7 @@ function dbRowToClient(row){
 
 function loadClients(){
   fetch(API_BASE+'/health-clients',{headers:apiHeaders()})
+  .then(_apiOk)
   .then(function(r){return r.json();})
   .then(function(data){
     clients=data.map(function(row){return dbRowToClient(row);});
@@ -492,7 +492,14 @@ function loadClients(){
     if(anyFilter)filterClients();else renderClientTable(clients);
     renderReportCards();renderReminderBanner();refreshReferrerDatalist();
     renderSidebarRecent(); // names only resolvable once clients are in memory
-  }).catch(function(e){console.error('Load error:',e);});
+  }).catch(function(e){
+    // Console-only was not enough. This runs after every save and delete, so a failure here left
+    // the agent looking at a roster that silently no longer matched the server — and on a 500 the
+    // error body is valid JSON, so `data.map` threw and even the render never ran. The roster
+    // already in memory is deliberately left alone: stale-but-labelled beats blank.
+    console.error('Load error:',e);
+    toast('Could not refresh the client list ('+(e&&e.message||'network error')+'). What you see may be out of date.','error',10000);
+  });
 }
 /* Reject on a non-2xx instead of sailing through it.
    The backend's 500 path returns {error:'...'} — VALID JSON — so a bare .then(r=>r.json())
@@ -2712,8 +2719,19 @@ function renderClientDocs(clientId,docs){
       // Only emit an https URL — never let a stored value inject a javascript: scheme.
       var safeUrl=/^https:\/\//i.test(d.url||'')?escHtml(d.url):'';
       row.innerHTML=icon+' <a href="'+safeUrl+'" target="_blank" rel="noopener noreferrer" style="flex:1;color:#1a3a5c;text-decoration:none;word-break:break-all;">'+escHtml(d.name)+'</a>'+
-        '<span style="color:#999;font-size:10px;">'+kb+'</span>'+
-        '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="deleteClientDoc(\''+clientId+'\',\''+encodeURIComponent(d.name)+'\')">✕</button>';
+        '<span style="color:#999;font-size:10px;">'+kb+'</span>';
+      // The filename is data from outside this app — it arrives on a file someone was sent, and the
+      // backend only strips path separators and whitespace from it. It used to be interpolated into
+      // an onclick="deleteClientDoc('id','name')" attribute via encodeURIComponent, which leaves
+      // ' . ( ) untouched — enough for a name like  x'.concat(deleteClient())).concat('y.pdf  to
+      // close the string literal and run. A real element with a real listener never parses it as code.
+      var delBtn=document.createElement('button');
+      delBtn.className='btn btn-red';
+      delBtn.style.cssText='padding:2px 8px;font-size:10px;';
+      delBtn.textContent='✕';
+      delBtn.title='Delete document';
+      delBtn.addEventListener('click',function(){deleteClientDoc(clientId,encodeURIComponent(d.name));});
+      row.appendChild(delBtn);
       ul.appendChild(row);
     });
     sec.appendChild(ul);
@@ -2736,21 +2754,48 @@ function uploadClientDoc(clientId){
     fd.append('file',file);
     fd.append('clientType','health');
     fd.append('clientId',clientId);
-    return fetch(API_BASE+'/documents',{method:'POST',headers:authUploadHeaders(),body:fd});
+    // Resolve to a per-file verdict rather than letting one rejection abandon the whole batch —
+    // with Promise.all a single failure hid the fate of every other file in the selection.
+    return fetch(API_BASE+'/documents',{method:'POST',headers:authUploadHeaders(),body:fd})
+      .then(function(r){
+        if(r.ok)return {ok:true,name:file.name};
+        return r.json().catch(function(){return null;}).then(function(b){
+          return {ok:false,name:file.name,msg:(b&&b.error)||('HTTP '+r.status)};
+        });
+      })
+      .catch(function(e){return {ok:false,name:file.name,msg:(e&&e.message)||'network error'};});
   });
-  var fileNames=files.map(function(f){return f.name;}).join(', ');
   Promise.all(promises)
-  .then(function(){
-    aiTrack('DocumentUploaded',{clientType:'health',clientId:clientId,fileCount:(fileNames||[]).length}); // filenames can carry PHI
-    status.textContent='';input.value='';loadClientDocs(clientId);
-  })
-  .catch(function(e){status.textContent='Upload failed: '+e;});
+  .then(function(results){
+    var failed=results.filter(function(x){return !x.ok;});
+    var okCount=results.length-failed.length;
+    // fileCount was `fileNames.length` on a JOINED STRING — it has always reported the character
+    // count of the concatenated filenames, not how many files went up.
+    if(okCount)aiTrack('DocumentUploaded',{clientType:'health',clientId:clientId,fileCount:okCount}); // filenames can carry PHI
+    if(failed.length){
+      // Leave the file input populated. Clearing it is the app's only "done" signal, and the agent
+      // needs to see which files still have to go up.
+      status.textContent=failed.length+' of '+results.length+' upload(s) FAILED — not saved.';
+      toast('Upload failed: '+failed.map(function(f){return f.name;}).join(', ')+
+        ' ('+failed[0].msg+'). '+(failed.length===results.length?'Nothing was saved.':'The rest were saved.'),'error',15000);
+    } else {
+      status.textContent='';input.value='';
+    }
+    if(okCount)loadClientDocs(clientId);
+  });
 }
 function deleteClientDoc(clientId,encodedName){
   showConfirm('Delete this document?',function(){
-    fetch(API_BASE+'/documents?clientType=health&clientId='+clientId+'&name='+encodedName,{method:'DELETE',headers:apiHeaders()})
+    // The name goes in the BODY, not the query string: a document filename routinely embeds the
+    // patient's name, and URLs end up in access logs and request telemetry. The Home Care frontend
+    // moved to this shape when the backend added it; this one was left on the legacy ?name= path.
+    fetch(API_BASE+'/documents?clientType=health&clientId='+clientId,
+      {method:'DELETE',headers:apiHeaders(),body:JSON.stringify({name:decodeURIComponent(encodedName)})})
+    .then(_apiOk)
+    // Only refresh on success. Refreshing either way made a refused delete look like one that
+    // worked and simply left the file in place.
     .then(function(){loadClientDocs(clientId);})
-    .catch(function(e){toast('Delete failed: '+e,'error');});
+    .catch(function(e){toast('Delete failed: '+((e&&e.message)||e)+' — the document is still there.','error',10000);});
   },{title:'Delete Document',okText:'Delete'});
 }
 
@@ -3058,4 +3103,5 @@ function addRenewalSetting(){var v=document.getElementById('newRenewalInput').va
 function removeRenewalSetting(i){showConfirm('Remove this renewal option?',function(){_settingsRenewals.splice(i,1);saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
 function saveCrmName(){var v=document.getElementById('settingsCrmName').value.trim();if(!v)return;_syncedSetItem('crm_display_name',v);document.querySelector('.sidebar .logo').childNodes[0].textContent=v;toast('CRM name updated!','success');}
 
+purgeLegacyAuditLog();
 try{initMSAL();loadCarriers();loadSettingsExtras();applySettingsToDropdowns();}catch(e){console.log('MSAL error:',e);showAuthScreen();}
