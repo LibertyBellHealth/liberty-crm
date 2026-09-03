@@ -172,3 +172,13 @@ test('removing a settings entry removes the one that was named', () => {
   assert.ok(!w._settingsAgents.includes('Cal'), 'the named entry survived');
   assert.ok(w._settingsAgents.includes('Ben'), 'a different entry was removed instead');
 });
+
+// ── PCI-DSS: the card verification value must not be stored after authorization. The column was
+// dropped from HealthClients on 2026-09-03 and nothing binds it server-side. This pins the last
+// place it could creep back in — the form field list, which builds ids as 'f_' + name.
+test('the client form never collects a CVV', () => {
+  const w = loadApp();
+  assert.ok(Array.isArray(w.FIELDS), 'expected the form field list');
+  assert.ok(!w.FIELDS.some(f => /cvv/i.test(f)), 'cvv is back in the form field list');
+  assert.strictEqual(w.document.getElementById('f_cvv'), null, 'a CVV input exists on the form');
+});
