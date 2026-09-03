@@ -1027,7 +1027,10 @@ var FIELDS=['firstName','mi','lastName','relation','marital','gender','tobacco',
   'billAddress','billZip','billCity','billSt','billCounty',
   'phone','phoneExt','altPhone','altPhoneExt','email','email2',
   'emergencyName','emergencyRelation','emergencyPhone',
-  'bankName','accountType','routing','account','accountName','cardType','cardNumber','cardExp','cvv',
+  // No 'cvv' here, and no #f_cvv input: PCI-DSS prohibits storing the card verification value
+  // after authorization, and the HealthClients.cvv column was dropped on 2026-09-03. Adding
+  // either one back would silently start capturing it again — the tests pin this.
+  'bankName','accountType','routing','account','accountName','cardType','cardNumber','cardExp',
   'healthPayDate','healthEffective','ancilPayDate','ancilEffective','dentalPayDate','dentalEffective','totalFirstMonth',
   'primaryEmployer','primaryIncome','spouseEmployer','spouseIncome',
   'otherIncome1','otherIncomeAmt1','otherIncome2','otherIncomeAmt2','otherIncome3','otherIncomeAmt3','totalIncome',
