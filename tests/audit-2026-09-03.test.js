@@ -182,3 +182,31 @@ test('the client form never collects a CVV', () => {
   assert.ok(!w.FIELDS.some(f => /cvv/i.test(f)), 'cvv is back in the form field list');
   assert.strictEqual(w.document.getElementById('f_cvv'), null, 'a CVV input exists on the form');
 });
+
+// ── The backend deliberately treats an OMITTED column as "leave it alone" (it filters the update
+// to `body[f] !== undefined`), and JSON.stringify drops undefined keys — that pairing is what
+// stops a save from wiping fields the form did not touch. It only holds if clientToDbRow emits
+// nothing for a field the form cannot produce. Two columns broke it by defaulting instead.
+test('a column the form cannot produce is never sent, so the server keeps what it has', () => {
+  const w = loadApp();
+  // getFormData builds its object from FIELDS, skipping any name with no #f_<name> input, so a
+  // field with no input is simply absent — exactly what this empty object stands for.
+  const body = JSON.parse(JSON.stringify(w.clientToDbRow({})));
+
+  assert.ok(!('homecare_client_id' in body),
+    'homecare_client_id was sent as null — every save would unlink the Home Care record');
+  assert.ok(!('waive_dental' in body),
+    'waive_dental was sent as 0 — every save would clear the flag');
+});
+
+test('those columns are still sent when the form does supply them', () => {
+  const w = loadApp();
+  const linked = JSON.parse(JSON.stringify(w.clientToDbRow({ f_homecareClientId: '7', f_waiveDental: true })));
+  assert.strictEqual(linked.homecare_client_id, 7);
+  assert.strictEqual(linked.waive_dental, 1);
+
+  // An explicit clear must still reach the server as a clear, not vanish.
+  const cleared = JSON.parse(JSON.stringify(w.clientToDbRow({ f_homecareClientId: '', f_waiveDental: false })));
+  assert.strictEqual(cleared.homecare_client_id, null);
+  assert.strictEqual(cleared.waive_dental, 0);
+});
