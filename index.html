@@ -6,24 +6,43 @@
 <title>Liberty Bell Health — CRM</title>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js" integrity="sha384-yXVL3cgcbuPa1TOmTYdr5MVOeFWnnXoYXcSIPBJ4lrnGHn8EZrbyurhG/xZMygBB" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
+<script src="https://js.monitor.azure.com/scripts/b/ai.2.min.js" crossorigin="anonymous"></script>
 <script type="text/javascript">
-!function(T,l,y){var S=T.location,k="script",D="instrumentationKey",C="ingestionendpoint",I="disableExceptionTracking",E="ai.device.",b="toLowerCase",w="crossOriginFailed",N="hi.device.",O="name",L="path",P="user",q="id",H="url",B="ingestionendpoint",F=function(e){var a=e.getAttribute;return a?a.call(e,"type"):""},j=function(){var e=document.getElementsByTagName(k);return e.length>0?e[e.length-1]:null},R=function(e){var a,t=e&&e.getAttribute;if(t&&(a=t.call(e,"data-website-id"))){return a}return null},A=function(e){return"function"==typeof e},s=function(e,a){return e[a]||{}},f=function(){return T[y.dle||"appInsights"]||{trackException:function(){},trackEvent:function(){},trackPageView:function(){},setAuthenticatedUserContext:function(){},clearAuthenticatedUserContext:function(){}}},G=function(){return T[y.dle||"appInsights"]},V=function(){},U=T,r=[];function g(e,a){r.push(arguments)}U[y.dle||"appInsights"]={queue:r,version:2,config:y.cfg};var h=document,m=h.createElement(k);m.src=y.src;m.crossOrigin="anonymous";var p=j();p?p.parentNode.insertBefore(m,p):h.getElementsByTagName("head")[0].appendChild(m);T[y.dle||"appInsights"]=function(e,a){for(var t=0;t<r.length;t++)r[t].apply(null,arguments);r=[]};}(window,document,{
-  src:"https://js.monitor.azure.com/scripts/b/ai.2.min.js",
-  crossOrigin:"anonymous",
-  // disableExceptionTracking: stack traces from render paths can carry PHI, and
-  // telemetry leaves our control. Errors are still surfaced via console + toasts.
-  cfg:{instrumentationKey:"5521b7a7-3097-4437-9d50-9b48d102ba6f",disableExceptionTracking:true}
-});
-// Strip query strings + URL fragments from the SDK's AUTO-captured telemetry (fetch/XHR
-// dependency URLs and the page-view uri) before it leaves the browser. Our own aiTrack calls
-// are scrubbed in app.js, but the SDK collects URLs on its own — and this app writes the record
-// id into the address bar (#/client/<id>, set by editClient) and calls
-// /api/health-clients/<id>, so those URIs carry record identifiers into telemetry we do not
-// control. Registered once the real SDK has loaded; the inline snippet above only stubs
-// trackEvent et al., so addTelemetryInitializer does not exist yet.
-(function attachAIScrubInitializer(tries){
-  var ai=window.appInsights;
-  if(ai&&typeof ai.addTelemetryInitializer==='function'){
+/* Application Insights, initialised explicitly instead of through the loader snippet.
+
+   The snippet that used to be here was CORRUPTED, and had been since it was added. It built the
+   object the SDK reads its configuration from —
+
+       window.appInsights = {queue: r, version: 2, config: y.cfg};
+
+   — appended the SDK script element, and then, on its very last statement, overwrote it
+   with a queue-flushing FUNCTION before that script had loaded. The SDK therefore found no config
+   at all, refused to start ("Please provide instrumentation key"), and left window.appInsights as
+   that function: no trackEvent, no core, never initialised. aiTrack() guards on `ai.trackEvent`,
+   so EVERY event has been silently dropped, and the PHI-stripping initializer below never
+   attached either. The key was never the problem — Liberty Home Care's index.html carries the
+   same corrupted snippet with a connection string and fails the same way.
+
+   Initialising directly is a few auditable lines instead of minified third-party glue, and it
+   fails safe: if anything here throws, window.appInsights stays undefined and aiTrack no-ops. */
+(function(){
+  try{
+    var AI = window.Microsoft && window.Microsoft.ApplicationInsights;
+    if(!AI || !AI.ApplicationInsights){ console.warn('App Insights SDK did not load — telemetry is off.'); return; }
+    var ai = new AI.ApplicationInsights({ config: {
+      // A connection string rather than a bare instrumentationKey: key-only ingestion is
+      // deprecated. Only the ingestion endpoint is included — the live-metrics endpoint is not
+      // in our CSP's connect-src, and live metrics are not used.
+      connectionString: "InstrumentationKey=5521b7a7-3097-4437-9d50-9b48d102ba6f;IngestionEndpoint=https://centralus-2.in.applicationinsights.azure.com/",
+      // Stack traces from render paths can carry PHI, and telemetry leaves our control.
+      disableExceptionTracking: true
+    }});
+    // Strip query strings and URL fragments from the SDK's AUTO-captured telemetry (fetch/XHR
+    // dependency URLs and the page-view uri). Our own aiTrack calls are scrubbed in app.js, but
+    // the SDK collects URLs by itself — and this app writes the record id into the address bar
+    // (#/client/<id>, set by editClient) and calls /api/health-clients/<id>, so those URIs carry
+    // record identifiers. Attached BEFORE loadAppInsights() so nothing sent during start-up can
+    // escape unscrubbed; the old retry loop could only attach after the SDK was already running.
     ai.addTelemetryInitializer(function(env){
       try{
         var strip=function(u){ return typeof u==='string' ? u.split('#')[0].split('?')[0] : u; };
@@ -31,10 +50,10 @@
         if(b){ ['uri','name','data','target'].forEach(function(f){ if(b[f]) b[f]=strip(b[f]); }); }
       }catch(e){}
     });
-    return;
-  }
-  if(tries>0) setTimeout(function(){ attachAIScrubInitializer(tries-1); },300);
-})(20);
+    ai.loadAppInsights();
+    window.appInsights = ai;
+  }catch(e){ console.warn('App Insights init failed — telemetry is off.', e); }
+})();
 </script>
 <link rel="stylesheet" href="styles.css?v=dev">
 </head>
