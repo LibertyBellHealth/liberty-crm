@@ -410,7 +410,13 @@ function clientToDbRow(d){
     has_medicare:d.f_hasMedicare?1:0,
     medicare_num:d.f_medicareNum, medicare_a_eff:d.f_medicareA, medicare_b_eff:d.f_medicareB,
     has_medicaid:d.f_hasMedicaid?1:0, medicaid_num:d.f_medicaid, medicaid_eff:d.f_medicaidEff,
-    waive_dental:d.f_waiveDental?1:0, total_monthly:d.f_totalMonthly,
+    // undefined, not 0, when the form did not supply it. The backend filters an update to the
+    // columns actually present in the body (`body[f] !== undefined`) precisely so a save cannot
+    // touch what it was not given, and JSON.stringify drops undefined keys — but a default of 0
+    // is a real value, so it sailed through and cleared the flag on every save. There is no
+    // #f_waiveDental input any more (the flag moved into the Dental ancillary row), so the form
+    // NEVER supplies it: this column could only ever be 0. false still sends 0, an explicit clear.
+    waive_dental:d.f_waiveDental===undefined?undefined:(d.f_waiveDental?1:0), total_monthly:d.f_totalMonthly,
     health_pay_date:d.f_healthPayDate, health_effective:d.f_healthEffective,
     ancil_pay_date:d.f_ancilPayDate, ancil_effective:d.f_ancilEffective,
     dental_pay_date:d.f_dentalPayDate, dental_effective:d.f_dentalEffective,
@@ -433,7 +439,11 @@ function clientToDbRow(d){
     doctors_json:JSON.stringify(d.doctors||[]),
     medications_json:JSON.stringify(d.meds||[]),
     ancil_plans_json:JSON.stringify(d.ancilPlans||[]),
-    homecare_client_id:parseInt(d.f_homecareClientId)||null,
+    // Same trap, worse consequence: `parseInt(undefined)||null` is null, a real value, so every
+    // save unlinked the Home Care record. There is no #f_homecareClientId input, so the form can
+    // never supply it — which is also why the client list's "homeCare" sort key can only ever
+    // read 0. An empty string still sends null, so an intentional unlink still works.
+    homecare_client_id:d.f_homecareClientId===undefined?undefined:(parseInt(d.f_homecareClientId)||null),
   };
 }
 function dbRowToClient(row){
