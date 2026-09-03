@@ -153,7 +153,7 @@ function initMSAL(){
      Cost: tokens are no longer shared across tabs, so a second tab does its own silent
      acquisition. With storeAuthStateInCookie and a live AAD session that is a redirect, not a
      password prompt — the same "Verifying authentication…" path the login wall already shows. */
-  var config={auth:{clientId:SP_CLIENT_ID,authority:'https://login.microsoftonline.com/'+SP_TENANT_ID,redirectUri:REDIRECT_URI},cache:{cacheLocation:'sessionStorage',storeAuthStateInCookie:true}};
+  var config={auth:{clientId:SP_CLIENT_ID,authority:'https://login.microsoftonline.com/'+SP_TENANT_ID,redirectUri:REDIRECT_URI},cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true}};
   msalInstance=new msal.PublicClientApplication(config);
   msalInstance.initialize().then(function(){
     msalInstance.handleRedirectPromise().then(function(resp){
