@@ -615,6 +615,17 @@ function closeDiscoveryPasteModal(){var m=document.getElementById('discoveryPast
    and Child blocks only create members when they have any data. Ignores
    fields the user chose to skip (SEP, HA/S/C, D/V, Preexisting Conditions,
    Hospital, Rx (handled elsewhere), etc). */
+/* Every label parseDiscoveryText recognises. Used to distinguish a real "Label- value" line from
+   a LIST ITEM that merely contains a dash — "Metformin 500mg - twice daily", "Dr. Smith -
+   Cardiology". Both match the label pattern, and inside a collector both are data, not labels.
+   Arrays + indexOf rather than an object, so a value like "constructor" can't test truthy. */
+var _DISCOVERY_LABELS=['rx','medications','primary dr','primary doctor','specialist','dr visits',
+  'lead source','phone number','phone','inquiry date','lead date','time','name','email','state',
+  'zip','county','household income','date of birth','gender','m/f'];
+var _DISCOVERY_NORM_LABELS=['dob','age','mf','tobacco','height','weight'];
+function _isDiscoveryLabel(label,norm){
+  return _DISCOVERY_LABELS.indexOf(label)!==-1||_DISCOVERY_NORM_LABELS.indexOf(norm)!==-1;
+}
 function parseDiscoveryText(text){
   var lines=(text||'').split(/\r?\n/);
   var section='primary'; // primary | spouse | child1 | child2 | child3 | child4
@@ -630,7 +641,13 @@ function parseDiscoveryText(text){
     members[sec][field]=val;
   }
   function addMed(str){var s=(str||'').trim();if(!s)return;var p=parseMedLine(s);if(p&&(p.name||p.mg))meds.push(p);}
-  function addDoc(name,specialty){var n=(name||'').trim();if(!n)return;doctors.push({name:n,specialty:specialty||''});}
+  function addDoc(name,specialty){
+    var n=(name||'').trim();if(!n)return;
+    // parseDoctorLine already splits "Dr. Smith - Cardiology"; the section ('Primary'/'Specialist')
+    // is the fallback for a line that names no specialty of its own.
+    var p=parseDoctorLine(n)||{name:n,specialty:''};
+    doctors.push({name:p.name||n,specialty:p.specialty||specialty||''});
+  }
 
   // Multi-line collector: after a label like "Rx-" (empty value), subsequent
   // unlabeled non-blank lines belong to that field until the next label.
@@ -674,6 +691,16 @@ function parseDiscoveryText(text){
       // Just informational; drop into notes if there's a value
       collecting=null;
       if(val)notesExtras.push('Dr Visits: '+val);
+      continue;
+    }
+    // Inside a collector, a line whose "label" is not one we recognise is a LIST ITEM that happens
+    // to contain a dash or colon, not a label. It used to be parsed as a label, dropped for
+    // matching nothing — and, because the next statement cleared the collector, every remaining
+    // line was dropped too. One "Metformin 500mg - twice daily" silently emptied the whole list.
+    if(collecting&&!_isDiscoveryLabel(label,label.replace(/[^\w]/g,''))){
+      if(collecting==='rx')addMed(line);
+      else if(collecting==='primary_dr')addDoc(line,'Primary');
+      else if(collecting==='specialist')addDoc(line,'Specialist');
       continue;
     }
     // Any other label line resets the multi-line collector
