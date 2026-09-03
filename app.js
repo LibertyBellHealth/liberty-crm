@@ -1315,13 +1315,13 @@ function editClient(id){
   audSec.className='form-section';
   audSec.id='clientAuditSection';
   formCard.insertBefore(audSec,actions);
-  loadClientAudit(_auditName(c));
+  loadClientAudit(_auditName(c),id);
 }
 
 /* Per-client access history. Reads the SAME table the writes above go to, and the same one
    documents.js already writes Health document access into — so this shows real history
    immediately, before any of the new write sites have fired even once. */
-function loadClientAudit(clientName){
+function loadClientAudit(clientName,forId){
   var sec=document.getElementById('clientAuditSection');
   if(!sec)return;
   sec.innerHTML='<div class="form-section-title">&#128274; Access History</div>'+
@@ -1331,13 +1331,17 @@ function loadClientAudit(clientName){
     body:JSON.stringify({scope:'health',client:clientName,limit:100})
   })
   .then(_apiOk).then(function(r){return r.json();})
-  .then(function(rows){renderClientAudit(clientName,rows||[]);})
+  .then(function(rows){
+    if(forId!==undefined&&String(editingId)!==String(forId))return; // see loadClientDocs
+    renderClientAudit(clientName,rows||[]);
+  })
   .catch(function(e){
+    if(forId!==undefined&&String(editingId)!==String(forId))return;
     // Same rule as documents: a failed load must not read as "nothing ever happened".
     sec.innerHTML='<div class="form-section-title">&#128274; Access History</div>'+
       '<p style="font-size:12px;color:#b00;">Could not load the access history ('+
       escHtml((e&&e.message)||'error')+'). '+
-      '<a href="#" onclick="loadClientAudit('+escJsAttr(JSON.stringify(clientName))+');return false;">Retry</a></p>';
+      '<a href="#" onclick="loadClientAudit('+escJsAttr(JSON.stringify(clientName))+','+escJsAttr(JSON.stringify(forId===undefined?null:forId))+');return false;">Retry</a></p>';
   });
 }
 function renderClientAudit(clientName,rows){
@@ -2922,8 +2926,16 @@ function loadClientDocs(clientId){
   sec.innerHTML='<div class="form-section-title">&#128196; Client Documents</div><p style="font-size:11px;color:#999;">Loading...</p>';
   fetch(API_BASE+'/documents?clientType=health&clientId='+clientId,{headers:apiHeaders()})
   .then(function(r){return r.json();})
-  .then(function(docs){_clientDocs=docs||[];renderClientDocs(clientId,docs);})
+  .then(function(docs){
+    // The agent may have opened a different client while this was in flight, and
+    // #clientDocsSection is a SHARED element rebuilt per record — so a late response would render
+    // one client's document list (filenames routinely contain a patient's name) under another
+    // client's name. editClient already guards its own fetch this way; the sections did not.
+    if(String(editingId)!==String(clientId))return;
+    _clientDocs=docs||[];renderClientDocs(clientId,docs);
+  })
   .catch(function(){
+    if(String(editingId)!==String(clientId))return;
     // A FAILED load must never render as "no documents yet" — indistinguishable from genuinely
     // empty, and the agent then re-uploads a document that is already there.
     _clientDocs=[];
@@ -2996,6 +3008,11 @@ function uploadClientDoc(clientId){
   });
   Promise.all(promises)
   .then(function(results){
+    // #docUploadStatus and the file input are SHARED elements that now belong to whichever client
+    // is on screen, so those writes are guarded. The toast is not: it is global, and an upload
+    // that did not save is not something to let the agent discover later just because they
+    // navigated away while it was in flight.
+    var stillOpen=String(editingId)===String(clientId);
     var failed=results.filter(function(x){return !x.ok;});
     var okCount=results.length-failed.length;
     // fileCount was `fileNames.length` on a JOINED STRING — it has always reported the character
@@ -3004,13 +3021,13 @@ function uploadClientDoc(clientId){
     if(failed.length){
       // Leave the file input populated. Clearing it is the app's only "done" signal, and the agent
       // needs to see which files still have to go up.
-      status.textContent=failed.length+' of '+results.length+' upload(s) FAILED — not saved.';
+      if(stillOpen)status.textContent=failed.length+' of '+results.length+' upload(s) FAILED — not saved.';
       toast('Upload failed: '+failed.map(function(f){return f.name;}).join(', ')+
         ' ('+failed[0].msg+'). '+(failed.length===results.length?'Nothing was saved.':'The rest were saved.'),'error',15000);
-    } else {
+    } else if(stillOpen){
       status.textContent='';input.value='';
     }
-    if(okCount)loadClientDocs(clientId);
+    if(okCount&&stillOpen)loadClientDocs(clientId);
   });
 }
 function deleteClientDoc(clientId,encodedName){
