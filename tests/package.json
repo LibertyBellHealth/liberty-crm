@@ -1,0 +1,12 @@
+{
+  "name": "liberty-health-crm-smoke-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Smoke tests for the Health CRM frontend (app.js). Isolated from the deployed site — the repo root has no package.json so Azure keeps treating the app as a pure static site.",
+  "scripts": {
+    "test": "node --test --test-force-exit"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0"
+  }
+}

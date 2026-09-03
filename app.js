@@ -107,9 +107,17 @@ function resetSessionTimer(){
 // sign-out. The previous fixed list was already wrong: it named 'crm_carriers' and
 // 'crm_settings', NEITHER of which is ever written, while the real key `crmCarriers` (written
 // at saveCarriers) survived — and carrier names are operator-editable free text. It also
-// missed crm_report_columns, crm_default_agent and the crm_carriers_seed_* flags.
+// missed crm_default_agent and the crm_carriers_seed_* flags. crm_report_columns is a list of
+// COLUMN NAMES with no client data in it, and it has no server copy — it belongs with the other
+// per-device preferences, not in the wipe. Everything else here is mirrored to AppSettings and
+// comes back from the server at the next sign-in.
 // Home Care hit the same bug and replaced the same pattern; see its clearPHIFromStorage.
-var _KEEP_ON_SIGNOUT = /(_col_widths|_page_size|_collapsed)$|^crm_display_name$/;
+// crm_todos is a TEMPORARY exception and the only one that is not a preference. It is the legacy
+// task list, and until migrateLegacyTodos has handed it to the server it is the ONLY copy — wiping
+// it here would silently destroy the agent's tasks on the first sign-out or tab close after this
+// change. Nothing writes the key any more, and the migration deletes it the moment the server
+// accepts every row, so it disappears on its own at the next successful sign-in.
+var _KEEP_ON_SIGNOUT = /(_col_widths|_page_size|_collapsed)$|^crm_display_name$|^crm_report_columns$|^crm_todos$/;
 function clearCRMStorage() {
   try {
     Object.keys(localStorage)
@@ -193,7 +201,10 @@ function onSignedIn(account){
   // errors / usage to a specific person when debugging.
   try{window._aiUser=email;if(window.appInsights&&window.appInsights.setAuthenticatedUserContext)window.appInsights.setAuthenticatedUserContext(email);}catch(e){}
   refreshApiToken().then(function(){
-    try{loadSettingsAPI();}catch(e){} resetSessionTimer(); loadClients(); routeFromHash(); });
+    try{loadSettingsAPI();}catch(e){} resetSessionTimer(); loadClients(); routeFromHash();
+    // Migrate first, THEN load: anything still on this device has to reach the server before the
+    // server's list replaces the in-memory one, or it is lost.
+    try{migrateLegacyTodos().then(loadTasksAPI);}catch(e){} });
 }
 /* Hash-based deep links so URLs like /#/client/<id> open that client directly.
    Enables bookmarking and sharing a link to a specific record. */
@@ -251,7 +262,13 @@ function _auditName(c){
   if(!c)return '';
   return String((c.f_firstName||'')+' '+(c.f_lastName||'')).trim();
 }
-function getAuditLog(){try{return JSON.parse(localStorage.getItem('crm_audit')||'[]');}catch(e){return [];}}
+/* The audit trail lives SERVER-SIDE (POST /audit, read back by loadClientAudit). There used to be
+   a parallel localStorage mirror here holding the patient name on 200 entries deep. Nothing ever
+   read it — loadClientAudit has always gone to the API — so it was pure standing PHI on the disk of
+   every browser that had ever opened a record, in plain violation of the no-PHI-in-localStorage
+   rule that crm_recent and crm_todos were both already fixed for. Removing the writes does nothing
+   for the browsers that already have months of it, so purge on startup too. */
+function purgeLegacyAuditLog(){try{localStorage.removeItem('crm_audit');}catch(e){}}
 function _postAuditRecord(body){
   // A failure here must be VISIBLE. A silently-dropped audit row is worse than a failed save:
   // the action still happened, and nothing records it.
@@ -270,13 +287,6 @@ function _postAuditRecord(body){
   });
 }
 function addAuditEntry(clientName,action){
-  var who=currentUserEmail();
-  try{
-    var log=getAuditLog();
-    log.unshift({client:clientName,action:action,who:who,ts:new Date().toLocaleString()});
-    if(log.length>200)log=log.slice(0,200);
-    localStorage.setItem('crm_audit',JSON.stringify(log));
-  }catch(e){}
   _postAuditRecord({event_type:'audit',client_name:clientName,action:action});
 }
 // Global (non-client) events — exports, sign-in/out, denied access. client_name:'' keeps them
@@ -478,6 +488,7 @@ function dbRowToClient(row){
 
 function loadClients(){
   fetch(API_BASE+'/health-clients',{headers:apiHeaders()})
+  .then(_apiOk)
   .then(function(r){return r.json();})
   .then(function(data){
     clients=data.map(function(row){return dbRowToClient(row);});
@@ -492,7 +503,14 @@ function loadClients(){
     if(anyFilter)filterClients();else renderClientTable(clients);
     renderReportCards();renderReminderBanner();refreshReferrerDatalist();
     renderSidebarRecent(); // names only resolvable once clients are in memory
-  }).catch(function(e){console.error('Load error:',e);});
+  }).catch(function(e){
+    // Console-only was not enough. This runs after every save and delete, so a failure here left
+    // the agent looking at a roster that silently no longer matched the server — and on a 500 the
+    // error body is valid JSON, so `data.map` threw and even the render never ran. The roster
+    // already in memory is deliberately left alone: stale-but-labelled beats blank.
+    console.error('Load error:',e);
+    toast('Could not refresh the client list ('+(e&&e.message||'network error')+'). What you see may be out of date.','error',10000);
+  });
 }
 /* Reject on a non-2xx instead of sailing through it.
    The backend's 500 path returns {error:'...'} — VALID JSON — so a bare .then(r=>r.json())
@@ -1293,14 +1311,20 @@ function saveClient(onSuccess){
 }
 function deleteClient(){
   if(!editingId)return;
-  var c=clients.find(function(x){return String(x._id)===String(editingId);});
+  // Pin the target BEFORE the dialog opens. The confirm is not modal to the browser: `hashchange`
+  // fires on the Back button with no click on the page, and routeFromHash → editClient reassigns
+  // editingId behind the open dialog. Reading editingId in the callback read it at OK-press time,
+  // so a dialog naming one client could delete a different one — and file the audit row under the
+  // name of the record that survived.
+  var id=editingId;
+  var c=clients.find(function(x){return String(x._id)===String(id);});
   var name=c?((c.f_firstName||'')+' '+(c.f_lastName||'')).trim():'this client';
   showConfirm('Delete '+(name||'this client')+'? This cannot be undone.',function(){
     // Logged BEFORE the delete: afterwards the record is gone and the name no longer resolves,
     // so the row would be filed under an id nobody can search for.
     addAuditEntry(name,'CLIENT RECORD DELETED by '+currentUserEmail());
-    deleteClientAPI(editingId).then(function(){
-      aiTrack('ClientDeleted',{clientId:editingId}); // no PHI in telemetry
+    deleteClientAPI(id).then(function(){
+      aiTrack('ClientDeleted',{clientId:id}); // no PHI in telemetry
       loadClients();showView('clients');
     }).catch(function(e){
       // Previously uncaught: a failed delete still navigated away as if it had worked.
@@ -1452,6 +1476,17 @@ function showConfirm(message,onOk,opts){
 /* Unsaved-changes tracking on the client edit form.
    Set dirty on any input inside #viewForm; cleared by clearForm/setFormData/saveClient. */
 var _formDirty=false;
+/* Remove one entry from a settings list by VALUE. Every caller reads an index at click time and
+   acts on it after the dialog closes, and these lists can shift underneath an open dialog (a
+   settings pull, or the same list edited in another tab). Splicing the stale index removed a
+   neighbour instead. Returns false if the entry is already gone. */
+function _removeByValue(arr,value){
+  if(value===undefined)return false;
+  var i=arr.indexOf(value);
+  if(i<0)return false;
+  arr.splice(i,1);
+  return true;
+}
 function markFormDirty(){_formDirty=true;}
 function clearFormDirty(){_formDirty=false;}
 document.addEventListener('DOMContentLoaded',function(){
@@ -1479,6 +1514,15 @@ function guardUnsavedChanges(proceed){
 /* Warn on tab-close only when the form is dirty */
 window.addEventListener('beforeunload',function(e){
   if(_formDirty){e.preventDefault();e.returnValue='';}
+});
+/* HIPAA: closing the tab is the common way this app is left — far more common than pressing Sign
+   out — and it used to leave everything clearCRMStorage clears sitting in the browser profile
+   until the next explicit sign-out. Internal navigation is hash-based and does not fire pagehide,
+   so this only runs on a real unload. Skipped when the page is going into bfcache, since it may
+   be restored. Everything here is re-fetched from the server on the next visit. */
+window.addEventListener('pagehide',function(e){
+  if(e&&e.persisted)return;
+  try{clearCRMStorage();}catch(_){}
 });
 /* Row-removal helper used by generated rows so onclick attributes stay short */
 function confirmRemoveRow(el,message,after){
@@ -2338,7 +2382,9 @@ function renderCarriers(){
 function confirmRemoveCarrier(idx){
   var c=carriers[idx];if(!c)return;
   showConfirm('Remove carrier "'+c.name+'"?',function(){
-    carriers.splice(idx,1);saveCarriers();renderCarriers();
+    // By identity, not by the position it held when the dialog opened.
+    var j=carriers.indexOf(c);if(j<0)return;
+    carriers.splice(j,1);saveCarriers();renderCarriers();
   },{title:'Remove Carrier',okText:'Remove'});
 }
 
@@ -2512,12 +2558,19 @@ function saveTodo(){
   var priority=document.getElementById('todoPriorityInput').value;
   var clientId=document.getElementById('todoClientId').value||'';
   // clientName deliberately NOT persisted — resolved from `clients` in renderTodos
-  _todos.unshift({id:Date.now(),task:task,due:due,priority:priority,done:false,created:new Date().toISOString(),clientId:clientId});
-  saveTodos();
+  var t={id:Date.now(),task:task,due:due,priority:priority,done:false,created:new Date().toISOString(),clientId:clientId};
+  _todos.unshift(t);
   document.getElementById('todoAddSection').style.display='none';
   document.getElementById('todoClientInput').value='';
   document.getElementById('todoClientId').value='';
   renderTodos();
+  // Show it immediately, then tell the truth about whether it actually saved. Nothing is kept on
+  // this device any more, so a task that never reached the server is gone at the next load —
+  // the agent has to be told that while the text is still on screen to re-enter.
+  saveTaskAPI(t).then(function(){renderTodos();}).catch(function(e){
+    t._unsaved=true;renderTodos();
+    toast('Task NOT saved: '+((e&&e.message)||e)+'. It will disappear when you reload — please re-enter it.','error',15000);
+  });
 }
 
 // ===================== ADVANCED SEARCH - add create date filter =====================
@@ -2643,8 +2696,10 @@ function addPlanTypeSetting(){
   document.getElementById('newPlanTypeInput').value='';renderSettings();
 }
 function removePlanTypeSetting(i){
+  var v=_settingsPlanTypes[i];
   showConfirm('Remove this plan type?',function(){
-    _settingsPlanTypes.splice(i,1);_syncedSetItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));renderSettings();
+    if(!_removeByValue(_settingsPlanTypes,v))return;
+    _syncedSetItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));renderSettings();
   },{title:'Remove',okText:'Remove'});
 }
 function addProjectCodeSetting(){
@@ -2654,8 +2709,10 @@ function addProjectCodeSetting(){
   document.getElementById('newProjectCodeInput').value='';renderSettings();
 }
 function removeProjectCodeSetting(i){
+  var v=_settingsProjectCodes[i];
   showConfirm('Remove this code?',function(){
-    _settingsProjectCodes.splice(i,1);_syncedSetItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
+    if(!_removeByValue(_settingsProjectCodes,v))return;
+    _syncedSetItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
   },{title:'Remove',okText:'Remove'});
 }
 function exportFullBackup(){
@@ -2712,8 +2769,19 @@ function renderClientDocs(clientId,docs){
       // Only emit an https URL — never let a stored value inject a javascript: scheme.
       var safeUrl=/^https:\/\//i.test(d.url||'')?escHtml(d.url):'';
       row.innerHTML=icon+' <a href="'+safeUrl+'" target="_blank" rel="noopener noreferrer" style="flex:1;color:#1a3a5c;text-decoration:none;word-break:break-all;">'+escHtml(d.name)+'</a>'+
-        '<span style="color:#999;font-size:10px;">'+kb+'</span>'+
-        '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="deleteClientDoc(\''+clientId+'\',\''+encodeURIComponent(d.name)+'\')">✕</button>';
+        '<span style="color:#999;font-size:10px;">'+kb+'</span>';
+      // The filename is data from outside this app — it arrives on a file someone was sent, and the
+      // backend only strips path separators and whitespace from it. It used to be interpolated into
+      // an onclick="deleteClientDoc('id','name')" attribute via encodeURIComponent, which leaves
+      // ' . ( ) untouched — enough for a name like  x'.concat(deleteClient())).concat('y.pdf  to
+      // close the string literal and run. A real element with a real listener never parses it as code.
+      var delBtn=document.createElement('button');
+      delBtn.className='btn btn-red';
+      delBtn.style.cssText='padding:2px 8px;font-size:10px;';
+      delBtn.textContent='✕';
+      delBtn.title='Delete document';
+      delBtn.addEventListener('click',function(){deleteClientDoc(clientId,encodeURIComponent(d.name));});
+      row.appendChild(delBtn);
       ul.appendChild(row);
     });
     sec.appendChild(ul);
@@ -2736,21 +2804,48 @@ function uploadClientDoc(clientId){
     fd.append('file',file);
     fd.append('clientType','health');
     fd.append('clientId',clientId);
-    return fetch(API_BASE+'/documents',{method:'POST',headers:authUploadHeaders(),body:fd});
+    // Resolve to a per-file verdict rather than letting one rejection abandon the whole batch —
+    // with Promise.all a single failure hid the fate of every other file in the selection.
+    return fetch(API_BASE+'/documents',{method:'POST',headers:authUploadHeaders(),body:fd})
+      .then(function(r){
+        if(r.ok)return {ok:true,name:file.name};
+        return r.json().catch(function(){return null;}).then(function(b){
+          return {ok:false,name:file.name,msg:(b&&b.error)||('HTTP '+r.status)};
+        });
+      })
+      .catch(function(e){return {ok:false,name:file.name,msg:(e&&e.message)||'network error'};});
   });
-  var fileNames=files.map(function(f){return f.name;}).join(', ');
   Promise.all(promises)
-  .then(function(){
-    aiTrack('DocumentUploaded',{clientType:'health',clientId:clientId,fileCount:(fileNames||[]).length}); // filenames can carry PHI
-    status.textContent='';input.value='';loadClientDocs(clientId);
-  })
-  .catch(function(e){status.textContent='Upload failed: '+e;});
+  .then(function(results){
+    var failed=results.filter(function(x){return !x.ok;});
+    var okCount=results.length-failed.length;
+    // fileCount was `fileNames.length` on a JOINED STRING — it has always reported the character
+    // count of the concatenated filenames, not how many files went up.
+    if(okCount)aiTrack('DocumentUploaded',{clientType:'health',clientId:clientId,fileCount:okCount}); // filenames can carry PHI
+    if(failed.length){
+      // Leave the file input populated. Clearing it is the app's only "done" signal, and the agent
+      // needs to see which files still have to go up.
+      status.textContent=failed.length+' of '+results.length+' upload(s) FAILED — not saved.';
+      toast('Upload failed: '+failed.map(function(f){return f.name;}).join(', ')+
+        ' ('+failed[0].msg+'). '+(failed.length===results.length?'Nothing was saved.':'The rest were saved.'),'error',15000);
+    } else {
+      status.textContent='';input.value='';
+    }
+    if(okCount)loadClientDocs(clientId);
+  });
 }
 function deleteClientDoc(clientId,encodedName){
   showConfirm('Delete this document?',function(){
-    fetch(API_BASE+'/documents?clientType=health&clientId='+clientId+'&name='+encodedName,{method:'DELETE',headers:apiHeaders()})
+    // The name goes in the BODY, not the query string: a document filename routinely embeds the
+    // patient's name, and URLs end up in access logs and request telemetry. The Home Care frontend
+    // moved to this shape when the backend added it; this one was left on the legacy ?name= path.
+    fetch(API_BASE+'/documents?clientType=health&clientId='+clientId,
+      {method:'DELETE',headers:apiHeaders(),body:JSON.stringify({name:decodeURIComponent(encodedName)})})
+    .then(_apiOk)
+    // Only refresh on success. Refreshing either way made a refused delete look like one that
+    // worked and simply left the file in place.
     .then(function(){loadClientDocs(clientId);})
-    .catch(function(e){toast('Delete failed: '+e,'error');});
+    .catch(function(e){toast('Delete failed: '+((e&&e.message)||e)+' — the document is still there.','error',10000);});
   },{title:'Delete Document',okText:'Delete'});
 }
 
@@ -2857,18 +2952,95 @@ var _todoFilter='all';
 /* Same PHI rule as recent-records: only clientId is persisted, the name is
    resolved from the in-memory clients array at render time. Migration below
    strips clientName from any entry saved before this fix. */
-function loadTodos(){
-  try{
-    _todos=JSON.parse(localStorage.getItem('crm_todos')||'[]');
-    var hadPHI=_todos.some(function(t){return t&&t.clientName;});
-    if(hadPHI){
-      _todos.forEach(function(t){if(t)delete t.clientName;});
-      saveTodos(); // re-persist immediately so the old names are gone from disk
-    }
-  }catch(e){_todos=[];}
+/* ── TASKS API (source='health') ──────────────────────────────────────────────
+   Tasks used to live in localStorage and nowhere else, which was wrong twice over.
+
+   1. Task text is operator free-text — "call Jane about her Medicaid renewal" — so the list
+      was PHI sitting at rest in the browser profile, the same rule crm_recent, crm_todos'
+      clientName and the audit mirror were all already fixed for.
+   2. clearCRMStorage wipes every crm_* key on sign-out, so the list was DESTROYED on every
+      sign-out, and existed on one device only.
+
+   The Tasks table has been there the whole time, discriminated by `source` and authorized per
+   entity (a Home Care user cannot read, edit, move or delete a health row). Home Care keeps a
+   localStorage cache on top of it; this app deliberately does not — the roster is already
+   memory-only here, and tasks now follow it.
+
+   `client_name` carries the client's ID for health rows, never the name: the UI resolves names
+   from the in-memory roster at render time, and nothing needs the name in the column. */
+function _taskToBody(t){
+  return {
+    id:t.dbId||undefined,
+    text:t.task||'',
+    done:t.done?1:0,
+    due:t.due||null,
+    client:t.clientId?String(t.clientId):'',   // ID, not name — see above
+    priority:t.priority||'normal',
+    source:'health'
+  };
 }
-function saveTodos(){localStorage.setItem('crm_todos',JSON.stringify(_todos));}
-loadTodos();
+function saveTaskAPI(t){
+  return fetch(API_BASE+'/tasks',{method:'POST',headers:apiHeaders(),body:JSON.stringify(_taskToBody(t))})
+    .then(_apiOk).then(function(r){return r.json();})
+    .then(function(res){
+      if(!t.dbId&&res&&res.id)t.dbId=res.id;
+      t._unsaved=false;
+      return res;
+    });
+}
+function deleteTaskAPI(dbId){
+  if(!dbId)return Promise.resolve();
+  return fetch(API_BASE+'/tasks/'+encodeURIComponent(dbId),{method:'DELETE',headers:apiHeaders()}).then(_apiOk);
+}
+function loadTasksAPI(){
+  if(!_apiToken)return Promise.resolve();
+  return fetch(API_BASE+'/tasks?source=health',{headers:apiHeaders()})
+    .then(_apiOk).then(function(r){return r.json();})
+    .then(function(rows){
+      _todos=(Array.isArray(rows)?rows:[]).map(function(t){
+        return {
+          id:t.id, dbId:t.id,
+          task:t.task_text||'',
+          done:!!t.done,
+          due:t.due_date?String(t.due_date).split('T')[0]:'',
+          priority:t.priority||'normal',
+          clientId:t.client_name||'',
+          created:t.created_at||''
+        };
+      });
+      // Newest first, matching the order the unshift-based local list produced.
+      _todos.sort(function(a,b){return (b.dbId||0)-(a.dbId||0);});
+      renderTodos();
+    })
+    .catch(function(e){
+      // Never render an empty task list on a failed load — indistinguishable from having none.
+      toast('Could not load tasks: '+((e&&e.message)||e)+'. This list may be incomplete.','error',10000);
+    });
+}
+/* One-time move of whatever is still in localStorage on this device up to the server, BEFORE the
+   key is dropped. Without this, shipping the change would delete every task the agent had. The key
+   is only removed once every row it held has been accepted, so a failed migration retries next
+   sign-in rather than losing the list. */
+function migrateLegacyTodos(){
+  var legacy=[];
+  try{legacy=JSON.parse(localStorage.getItem('crm_todos')||'[]');}catch(e){legacy=[];}
+  if(!Array.isArray(legacy)||!legacy.length){
+    try{localStorage.removeItem('crm_todos');}catch(e){}
+    return Promise.resolve();
+  }
+  return Promise.all(legacy.map(function(t){
+    if(!t)return Promise.resolve(true);
+    // Drop any dbId a legacy row somehow carries — these have never been on the server.
+    return saveTaskAPI({task:t.task,done:t.done,due:t.due,priority:t.priority,clientId:t.clientId})
+      .then(function(){return true;}).catch(function(){return false;});
+  })).then(function(results){
+    if(results.every(Boolean)){
+      try{localStorage.removeItem('crm_todos');}catch(e){}
+    } else {
+      toast('Some tasks could not be moved to the server and are still only on this device. They will retry at next sign-in.','error',15000);
+    }
+  });
+}
 function openAddTodo(){
   var s=document.getElementById('todoAddSection');
   s.style.display='block';
@@ -2881,21 +3053,44 @@ function openAddTodo(){
 }
 function toggleTodo(id){
   var t=_todos.find(function(x){return x.id===id;});
-  if(t)t.done=!t.done;
-  saveTodos();renderTodos();
+  if(!t)return;
+  t.done=!t.done;
+  renderTodos();
+  saveTaskAPI(t).catch(function(e){
+    // Put the tick back. A checkbox that stays ticked after a failed save is a lie the agent
+    // acts on — the task reappears as outstanding at the next load with no explanation.
+    t.done=!t.done;renderTodos();
+    toast('Could not update that task: '+((e&&e.message)||e),'error',10000);
+  });
 }
 function deleteTodo(id){
+  var t=_todos.find(function(x){return x.id===id;});
+  if(!t)return;
   showConfirm('Delete this task?',function(){
-    _todos=_todos.filter(function(x){return x.id!==id;});
-    saveTodos();renderTodos();
+    // Remove locally only once the server has accepted it, or the task returns at the next load.
+    deleteTaskAPI(t.dbId).then(function(){
+      _todos=_todos.filter(function(x){return x!==t;});
+      renderTodos();
+    }).catch(function(e){
+      toast('Could not delete that task: '+((e&&e.message)||e)+' — it is still there.','error',10000);
+    });
   },{title:'Delete Task',okText:'Delete'});
 }
 function clearCompletedTodos(){
-  var done=_todos.filter(function(x){return x.done;}).length;
-  if(!done){toast('No completed tasks to clear.','info');return;}
-  showConfirm('Remove '+done+' completed task'+(done!==1?'s':'')+'?',function(){
-    _todos=_todos.filter(function(x){return !x.done;});
-    saveTodos();renderTodos();
+  // Pin the actual tasks now, not a count to re-derive after the dialog: the list can change
+  // while it is open, and this used to re-filter _todos at OK-press time.
+  var doneTasks=_todos.filter(function(x){return x.done;});
+  if(!doneTasks.length){toast('No completed tasks to clear.','info');return;}
+  showConfirm('Remove '+doneTasks.length+' completed task'+(doneTasks.length!==1?'s':'')+'?',function(){
+    Promise.all(doneTasks.map(function(t){
+      return deleteTaskAPI(t.dbId).then(function(){return t;}).catch(function(){return null;});
+    })).then(function(results){
+      var removed=results.filter(Boolean);
+      _todos=_todos.filter(function(x){return removed.indexOf(x)<0;});
+      renderTodos();
+      var failed=results.length-removed.length;
+      if(failed)toast(failed+' task'+(failed===1?'':'s')+' could not be removed and are still here.','error',10000);
+    });
   },{title:'Clear Completed',okText:'Remove'});
 }
 function setTodoFilter(f){
@@ -2936,10 +3131,13 @@ function renderTodos(){
       var tcName=tc?(((tc.f_firstName||'')+' '+(tc.f_lastName||'')).trim()||'Unnamed'):'';
       if(tcName)clientLink='<span onclick="editClient(\''+escJsAttr(t.clientId)+'\')" style="font-size:10px;background:#dbeafe;color:#1a3a5c;padding:2px 8px;border-radius:10px;cursor:pointer;margin-left:6px;font-weight:600;" title="Open client record">&#128101; '+escHtml(tcName)+'</span>';
     }
+    // A task the server never accepted is not coming back after a reload. Say so on the row
+    // itself, not only in a toast that has already gone.
+    var unsavedTag=t._unsaved?'<span style="font-size:10px;background:#fde2e2;color:#a01c1c;padding:2px 8px;border-radius:10px;margin-left:6px;font-weight:600;" title="This task was not saved to the server and will disappear when you reload.">NOT SAVED</span>':'';
     div.innerHTML=
       '<input type="checkbox" '+(t.done?'checked':'')+' style="width:16px;height:16px;cursor:pointer;flex-shrink:0;" onchange="toggleTodo('+t.id+')">'+
       '<div style="flex:1;">'+
-        '<span style="font-size:13px;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+escHtml(t.task)+'</span>'+dueStr+clientLink+
+        '<span style="font-size:13px;'+(t.done?'text-decoration:line-through;color:#999;':'')+'">'+escHtml(t.task)+'</span>'+dueStr+clientLink+unsavedTag+
       '</div>'+
       '<span style="font-size:10px;color:'+prioColor+';font-weight:600;white-space:nowrap;">'+prioLabel+'</span>'+
       '<button class="btn btn-red" style="padding:2px 7px;font-size:11px;" onclick="deleteTodo('+t.id+')">✕</button>';
@@ -3049,13 +3247,14 @@ function renderSettings(){
   if(nameEl)nameEl.value=localStorage.getItem('crm_display_name')||'Liberty Bell Health';
 }
 function addAgentSetting(){var v=document.getElementById('newAgentInput').value.trim();if(!v)return;if(_settingsAgents.indexOf(v)!==-1){toast('Agent already exists.','info');return;}_settingsAgents.push(v);document.getElementById('newAgentInput').value='';saveSettings();renderSettings();populateDefaultAgentSelect();}
-function removeAgentSetting(i){showConfirm('Remove this agent?',function(){_settingsAgents.splice(i,1);saveSettings();renderSettings();populateDefaultAgentSelect();},{title:'Remove',okText:'Remove'});}
+function removeAgentSetting(i){var v=_settingsAgents[i];showConfirm('Remove this agent?',function(){if(!_removeByValue(_settingsAgents,v))return;saveSettings();renderSettings();populateDefaultAgentSelect();},{title:'Remove',okText:'Remove'});}
 function addLeadSourceSetting(){var v=document.getElementById('newLeadSourceInput').value.trim();if(!v)return;if(_settingsLeadSources.indexOf(v)!==-1){toast('Lead source already exists.','info');return;}_settingsLeadSources.push(v);document.getElementById('newLeadSourceInput').value='';saveSettings();renderSettings();}
-function removeLeadSourceSetting(i){showConfirm('Remove this lead source?',function(){_settingsLeadSources.splice(i,1);saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
+function removeLeadSourceSetting(i){var v=_settingsLeadSources[i];showConfirm('Remove this lead source?',function(){if(!_removeByValue(_settingsLeadSources,v))return;saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
 function addCustomMedSetting(){var v=document.getElementById('newCustomMedInput').value.trim();if(!v)return;saveCustomMed(v);document.getElementById('newCustomMedInput').value='';renderSettings();}
-function removeCustomMedSetting(i){showConfirm('Remove this medication?',function(){_customMeds.splice(i,1);_syncedSetItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();},{title:'Remove',okText:'Remove'});}
+function removeCustomMedSetting(i){var v=_customMeds[i];showConfirm('Remove this medication?',function(){if(!_removeByValue(_customMeds,v))return;_syncedSetItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();},{title:'Remove',okText:'Remove'});}
 function addRenewalSetting(){var v=document.getElementById('newRenewalInput').value.trim();if(!v)return;if(_settingsRenewals.indexOf(v)!==-1){toast('Already exists.','info');return;}_settingsRenewals.push(v);document.getElementById('newRenewalInput').value='';saveSettings();renderSettings();}
-function removeRenewalSetting(i){showConfirm('Remove this renewal option?',function(){_settingsRenewals.splice(i,1);saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
+function removeRenewalSetting(i){var v=_settingsRenewals[i];showConfirm('Remove this renewal option?',function(){if(!_removeByValue(_settingsRenewals,v))return;saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
 function saveCrmName(){var v=document.getElementById('settingsCrmName').value.trim();if(!v)return;_syncedSetItem('crm_display_name',v);document.querySelector('.sidebar .logo').childNodes[0].textContent=v;toast('CRM name updated!','success');}
 
+purgeLegacyAuditLog();
 try{initMSAL();loadCarriers();loadSettingsExtras();applySettingsToDropdowns();}catch(e){console.log('MSAL error:',e);showAuthScreen();}
