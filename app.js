@@ -1130,6 +1130,19 @@ function clearForm(){
   var rc=document.getElementById('f_resCounty');if(rc)rc.innerHTML='<option value=""></option>';
   var bc=document.getElementById('f_billCounty');if(bc)bc.innerHTML='<option value=""></option>';
 }
+/* The client's status is packed into the notes column as a leading "[STATUS:X]" marker so it
+   needs no column of its own (see getFormData). The form unpacked it; nothing else did, so every
+   other reader of f_notes saw the marker — including the Notes column of exportFullBackup and of
+   the advanced-search export, both of which are documents that leave the building.
+
+   Only a LEADING marker is structural. A note that mentions "[STATUS:...]" further down is the
+   client's own text and is left exactly as typed. */
+var _STATUS_PREFIX=/^\[STATUS:([^\]]+)\]\n?/i;
+function clientNotesText(c){return String((c&&c.f_notes)||'').replace(_STATUS_PREFIX,'');}
+function clientStatus(c){
+  var m=String((c&&c.f_notes)||'').match(_STATUS_PREFIX);
+  return m?m[1].trim():'Active'; // records predating the marker are Active
+}
 function getFormData(){
   var data={};
   FIELDS.forEach(function(f){var el=document.getElementById('f_'+f);if(!el)return;if(el.type==='checkbox')data['f_'+f]=el.checked;else data['f_'+f]=el.value;});
@@ -1164,8 +1177,7 @@ function getFormData(){
   // prepend the current status. Kept invisible in the UI (extracted on load).
   var stEl=document.getElementById('f_status');
   var status=stEl?(stEl.value||'Active'):'Active';
-  var notes=(data.f_notes||'').replace(/^\[STATUS:[^\]]+\]\n?/i,'');
-  data.f_notes='[STATUS:'+status+']\n'+notes;
+  data.f_notes='[STATUS:'+status+']\n'+clientNotesText(data);
   // Address type packing: prefix bill_address with [BILL] or [BOTH] when the user
   // marked the extra address as billing or both. Mailing (default) gets no prefix
   // for cleanliness. Only applies if the address is actually populated.
@@ -1219,16 +1231,10 @@ function setFormData(data){
   // Old clients without a prefix default to Active.
   var stEl=document.getElementById('f_status');
   if(stEl){
-    var rawNotes=data.f_notes||'';
-    var stMatch=rawNotes.match(/^\[STATUS:([^\]]+)\]\n?/i);
-    if(stMatch){
-      stEl.value=stMatch[1].trim();
-      // Strip the prefix from the visible notes field
-      var notesInput=document.getElementById('f_notes');
-      if(notesInput)notesInput.value=rawNotes.replace(/^\[STATUS:[^\]]+\]\n?/i,'');
-    } else {
-      stEl.value='Active';
-    }
+    stEl.value=clientStatus(data);
+    // Keep the marker out of the visible notes field.
+    var notesInput=document.getElementById('f_notes');
+    if(notesInput)notesInput.value=clientNotesText(data);
   }
   // Unpack packed referral: "Referral: John Smith" → leadSource="Referral", referredBy="John Smith"
   var lsEl=document.getElementById('f_leadSource'),rbEl=document.getElementById('f_referredBy');
@@ -2884,7 +2890,7 @@ function exportFullBackup(){
   if(!clients.length){toast('No clients to export.','error');return;}
   var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Carrier','Premium','Subsidy','Total Monthly','App Fee','Agent','Lead Source','Renewed','State','City','ZIP','County','Medicare','Medicaid','Notes','App Date']];
   clients.forEach(function(c){
-    rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_planCarrier||'',c.f_premium||'',c.f_subsidy||'',c.f_totalMonthly||'',c.f_appFee||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'',c.f_resSt||'',c.f_resCity||'',c.f_resZip||'',c.f_resCounty||'',c.f_hasMedicare?'Yes':'No',c.f_hasMedicaid?'Yes':'No',c.f_notes||'',c.f_date||'']);
+    rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_planCarrier||'',c.f_premium||'',c.f_subsidy||'',c.f_totalMonthly||'',c.f_appFee||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'',c.f_resSt||'',c.f_resCity||'',c.f_resZip||'',c.f_resCounty||'',c.f_hasMedicare?'Yes':'No',c.f_hasMedicaid?'Yes':'No',clientNotesText(c),c.f_date||'']);
   });
   // fmtToday(), not toISOString(): the latter is UTC, so a backup taken after 8pm in Michigan
   // was filed under tomorrow's date — a disclosure record dated to the wrong day.
@@ -3069,6 +3075,7 @@ function reportFieldValue(c,f){
     case 'carrier':return c.f_planCarrier||'';
     case 'medicare':return c.f_hasMedicare?'Yes':'No';
     case 'medicaid':return c.f_hasMedicaid?'Yes':'No';
+    case 'notes':return clientNotesText(c);
     default:return c['f_'+f]||'';
   }
 }

@@ -84,6 +84,25 @@ function resetStorage(win) {
   try { win.eval('clients = []; carriers = []; _recentRecords = []; _todos = []; _clientDocs = [];'); } catch (e) {}
 }
 
+/* Build the parts of the client form a test needs, taken from the REAL index.html so the element
+   types (checkbox vs text vs select) match what ships. setFormData and getFormData look elements
+   up by id and quietly skip anything missing, so a hand-rolled partial form makes a test pass or
+   fail for reasons that have nothing to do with the code under test. */
+function formDom(win) {
+  if (win.document.getElementById('__formDom')) return;
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const host = win.document.createElement('div');
+  host.id = '__formDom';
+  // Every f_* control the form defines, verbatim, plus the containers setFormData repopulates.
+  const controls = html.match(/<(?:input|select|textarea)[^>]*\bid="f_[A-Za-z0-9_]+"[^>]*>(?:[\s\S]*?<\/select>)?/g) || [];
+  host.innerHTML = controls.join('\n') +
+    ['membersContainer', 'doctorsContainer', 'medsContainer', 'ancilContainer',
+     'otherIncomeContainer', 'mailingAddressSection', 'medicareFields', 'medicaidFields',
+     'memberCount', 'totalIncomeDisplay', 'totalMonthlyDisplay']
+      .map((id) => '<div id="' + id + '"></div>').join('');
+  win.document.body.appendChild(host);
+}
+
 // Realm-safe deep compare. Values returned from app.js live in the jsdom realm, so
 // assert.deepStrictEqual fails on prototype identity against a Node-realm literal.
 function jsonEqual(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
@@ -99,4 +118,4 @@ function confirmOk(win) {
   btn.dispatchEvent(new win.Event('click'));
 }
 
-module.exports = { loadApp, resetStorage, jsonEqual, confirmOk, stub };
+module.exports = { loadApp, resetStorage, jsonEqual, confirmOk, stub, formDom };
