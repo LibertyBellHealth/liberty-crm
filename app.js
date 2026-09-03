@@ -2154,6 +2154,10 @@ function exportReportExcel(){
   dlXLSX(rows,'report.xlsx');
 }
 function exportExcel(){
+  // §164.528: this sends the WHOLE roster — names, DOB, phone, email, plan, premium — out of the
+  // application. The other three export paths recorded that; this one did not, so the largest
+  // extract of the four was the only one leaving no trace.
+  try{logActivity('export','client list export downloaded by '+currentUserEmail());}catch(e){}
   var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Subsidy','Agent','Lead Source','Renewed']];
   clients.forEach(function(c){rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_subsidy||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'']);});
   dlXLSX(rows,'clients.xlsx');
@@ -2820,7 +2824,9 @@ function exportFullBackup(){
   clients.forEach(function(c){
     rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_planCarrier||'',c.f_premium||'',c.f_subsidy||'',c.f_totalMonthly||'',c.f_appFee||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'',c.f_resSt||'',c.f_resCity||'',c.f_resZip||'',c.f_resCounty||'',c.f_hasMedicare?'Yes':'No',c.f_hasMedicaid?'Yes':'No',c.f_notes||'',c.f_date||'']);
   });
-  dlXLSX(rows,'liberty_crm_backup_'+new Date().toISOString().split('T')[0]+'.xlsx');
+  // fmtToday(), not toISOString(): the latter is UTC, so a backup taken after 8pm in Michigan
+  // was filed under tomorrow's date — a disclosure record dated to the wrong day.
+  dlXLSX(rows,'liberty_crm_backup_'+fmtToday()+'.xlsx');
 }
 function clearPreviewData(){
   showConfirm('This will permanently delete all client data saved in Preview Mode. Are you sure?',function(){
@@ -3203,7 +3209,11 @@ function renderTodos(){
     if(_todoFilter==='done')return t.done;
     return true;
   });
-  var today=new Date().toISOString().split('T')[0];
+  // The due date comes from an <input type="date">, whose value is the LOCAL calendar day.
+  // Comparing it against a UTC "today" made every evening wrong: from 8pm Michigan time until
+  // midnight, toISOString() already reports tomorrow, so a task due today rendered as Overdue
+  // and one due tomorrow rendered as Due Today.
+  var today=fmtToday();
   document.getElementById('todoEmpty').style.display=filtered.length===0?'block':'none';
   container.innerHTML='';
   filtered.forEach(function(t){
@@ -3256,7 +3266,7 @@ function renderClientTodos(clientId){
   } else {
     var ul=document.createElement('div');
     tasks.forEach(function(t){
-      var today=new Date().toISOString().split('T')[0];
+      var today=fmtToday(); // local calendar day — see renderTodos
       var overdue=t.due&&t.due<today&&!t.done;
       var row=document.createElement('div');
       row.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:12px;';
