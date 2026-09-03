@@ -132,3 +132,43 @@ test('legacy audit entries already in localStorage are purged on load', () => {
 
   assert.doesNotMatch(w.localStorage.getItem('crm_audit') || '', /Jane|Patient/);
 });
+
+// ── The confirm dialog is not modal to the browser. `hashchange` fires on the Back button with
+// no click on the page at all, and routeFromHash → editClient reassigns editingId behind the
+// open dialog. Anything that reads app state INSIDE the callback is reading it at OK-press time,
+// not at the moment the user was shown what they were agreeing to.
+test('deleting a client deletes the record the dialog named', () => {
+  const w = loadApp();
+  resetStorage(w);
+  const deleted = [], audited = [];
+  w.eval('clients=[{_id:"A",f_firstName:"Ada",f_lastName:"Lovelace"},' +
+         '{_id:"B",f_firstName:"Bo",f_lastName:"Mira"}]; editingId="B";');
+  stub(w, {
+    deleteClientAPI: (id) => { deleted.push(String(id)); return Promise.resolve(); },
+    addAuditEntry: (name) => { audited.push(name); },
+    loadClients: () => {}, showView: () => {}, aiTrack: () => {},
+  });
+
+  w.deleteClient();                 // dialog says "Delete Bo Mira?"
+  w.eval('editingId="A";');         // Back button re-routes the hash to the other client
+  confirmOk(w);
+
+  assert.deepStrictEqual(deleted, ['B'], 'deleted a different client than the dialog named');
+  assert.deepStrictEqual(audited, ['Bo Mira'], 'the audit row named a different client than was deleted');
+});
+
+// ── Same shape, by index instead of id: the settings lists are spliced at a position captured
+// before the dialog opened.
+test('removing a settings entry removes the one that was named', () => {
+  const w = loadApp();
+  resetStorage(w);
+  stub(w, { fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }) });
+  w.eval('_settingsAgents=["Ann","Ben","Cal"];');
+
+  w.removeAgentSetting(2);          // dialog opened for "Cal"
+  w.eval('_settingsAgents.unshift("Zed");');  // the list shifts underneath it
+  confirmOk(w);
+
+  assert.ok(!w._settingsAgents.includes('Cal'), 'the named entry survived');
+  assert.ok(w._settingsAgents.includes('Ben'), 'a different entry was removed instead');
+});

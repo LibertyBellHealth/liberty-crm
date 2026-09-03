@@ -1300,14 +1300,20 @@ function saveClient(onSuccess){
 }
 function deleteClient(){
   if(!editingId)return;
-  var c=clients.find(function(x){return String(x._id)===String(editingId);});
+  // Pin the target BEFORE the dialog opens. The confirm is not modal to the browser: `hashchange`
+  // fires on the Back button with no click on the page, and routeFromHash → editClient reassigns
+  // editingId behind the open dialog. Reading editingId in the callback read it at OK-press time,
+  // so a dialog naming one client could delete a different one — and file the audit row under the
+  // name of the record that survived.
+  var id=editingId;
+  var c=clients.find(function(x){return String(x._id)===String(id);});
   var name=c?((c.f_firstName||'')+' '+(c.f_lastName||'')).trim():'this client';
   showConfirm('Delete '+(name||'this client')+'? This cannot be undone.',function(){
     // Logged BEFORE the delete: afterwards the record is gone and the name no longer resolves,
     // so the row would be filed under an id nobody can search for.
     addAuditEntry(name,'CLIENT RECORD DELETED by '+currentUserEmail());
-    deleteClientAPI(editingId).then(function(){
-      aiTrack('ClientDeleted',{clientId:editingId}); // no PHI in telemetry
+    deleteClientAPI(id).then(function(){
+      aiTrack('ClientDeleted',{clientId:id}); // no PHI in telemetry
       loadClients();showView('clients');
     }).catch(function(e){
       // Previously uncaught: a failed delete still navigated away as if it had worked.
@@ -1459,6 +1465,17 @@ function showConfirm(message,onOk,opts){
 /* Unsaved-changes tracking on the client edit form.
    Set dirty on any input inside #viewForm; cleared by clearForm/setFormData/saveClient. */
 var _formDirty=false;
+/* Remove one entry from a settings list by VALUE. Every caller reads an index at click time and
+   acts on it after the dialog closes, and these lists can shift underneath an open dialog (a
+   settings pull, or the same list edited in another tab). Splicing the stale index removed a
+   neighbour instead. Returns false if the entry is already gone. */
+function _removeByValue(arr,value){
+  if(value===undefined)return false;
+  var i=arr.indexOf(value);
+  if(i<0)return false;
+  arr.splice(i,1);
+  return true;
+}
 function markFormDirty(){_formDirty=true;}
 function clearFormDirty(){_formDirty=false;}
 document.addEventListener('DOMContentLoaded',function(){
@@ -2345,7 +2362,9 @@ function renderCarriers(){
 function confirmRemoveCarrier(idx){
   var c=carriers[idx];if(!c)return;
   showConfirm('Remove carrier "'+c.name+'"?',function(){
-    carriers.splice(idx,1);saveCarriers();renderCarriers();
+    // By identity, not by the position it held when the dialog opened.
+    var j=carriers.indexOf(c);if(j<0)return;
+    carriers.splice(j,1);saveCarriers();renderCarriers();
   },{title:'Remove Carrier',okText:'Remove'});
 }
 
@@ -2650,8 +2669,10 @@ function addPlanTypeSetting(){
   document.getElementById('newPlanTypeInput').value='';renderSettings();
 }
 function removePlanTypeSetting(i){
+  var v=_settingsPlanTypes[i];
   showConfirm('Remove this plan type?',function(){
-    _settingsPlanTypes.splice(i,1);_syncedSetItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));renderSettings();
+    if(!_removeByValue(_settingsPlanTypes,v))return;
+    _syncedSetItem('crm_plan_types',JSON.stringify(_settingsPlanTypes));renderSettings();
   },{title:'Remove',okText:'Remove'});
 }
 function addProjectCodeSetting(){
@@ -2661,8 +2682,10 @@ function addProjectCodeSetting(){
   document.getElementById('newProjectCodeInput').value='';renderSettings();
 }
 function removeProjectCodeSetting(i){
+  var v=_settingsProjectCodes[i];
   showConfirm('Remove this code?',function(){
-    _settingsProjectCodes.splice(i,1);_syncedSetItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
+    if(!_removeByValue(_settingsProjectCodes,v))return;
+    _syncedSetItem('crm_project_codes',JSON.stringify(_settingsProjectCodes));renderSettings();
   },{title:'Remove',okText:'Remove'});
 }
 function exportFullBackup(){
@@ -3094,13 +3117,13 @@ function renderSettings(){
   if(nameEl)nameEl.value=localStorage.getItem('crm_display_name')||'Liberty Bell Health';
 }
 function addAgentSetting(){var v=document.getElementById('newAgentInput').value.trim();if(!v)return;if(_settingsAgents.indexOf(v)!==-1){toast('Agent already exists.','info');return;}_settingsAgents.push(v);document.getElementById('newAgentInput').value='';saveSettings();renderSettings();populateDefaultAgentSelect();}
-function removeAgentSetting(i){showConfirm('Remove this agent?',function(){_settingsAgents.splice(i,1);saveSettings();renderSettings();populateDefaultAgentSelect();},{title:'Remove',okText:'Remove'});}
+function removeAgentSetting(i){var v=_settingsAgents[i];showConfirm('Remove this agent?',function(){if(!_removeByValue(_settingsAgents,v))return;saveSettings();renderSettings();populateDefaultAgentSelect();},{title:'Remove',okText:'Remove'});}
 function addLeadSourceSetting(){var v=document.getElementById('newLeadSourceInput').value.trim();if(!v)return;if(_settingsLeadSources.indexOf(v)!==-1){toast('Lead source already exists.','info');return;}_settingsLeadSources.push(v);document.getElementById('newLeadSourceInput').value='';saveSettings();renderSettings();}
-function removeLeadSourceSetting(i){showConfirm('Remove this lead source?',function(){_settingsLeadSources.splice(i,1);saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
+function removeLeadSourceSetting(i){var v=_settingsLeadSources[i];showConfirm('Remove this lead source?',function(){if(!_removeByValue(_settingsLeadSources,v))return;saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
 function addCustomMedSetting(){var v=document.getElementById('newCustomMedInput').value.trim();if(!v)return;saveCustomMed(v);document.getElementById('newCustomMedInput').value='';renderSettings();}
-function removeCustomMedSetting(i){showConfirm('Remove this medication?',function(){_customMeds.splice(i,1);_syncedSetItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();},{title:'Remove',okText:'Remove'});}
+function removeCustomMedSetting(i){var v=_customMeds[i];showConfirm('Remove this medication?',function(){if(!_removeByValue(_customMeds,v))return;_syncedSetItem('crm_custom_meds',JSON.stringify(_customMeds));renderSettings();},{title:'Remove',okText:'Remove'});}
 function addRenewalSetting(){var v=document.getElementById('newRenewalInput').value.trim();if(!v)return;if(_settingsRenewals.indexOf(v)!==-1){toast('Already exists.','info');return;}_settingsRenewals.push(v);document.getElementById('newRenewalInput').value='';saveSettings();renderSettings();}
-function removeRenewalSetting(i){showConfirm('Remove this renewal option?',function(){_settingsRenewals.splice(i,1);saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
+function removeRenewalSetting(i){var v=_settingsRenewals[i];showConfirm('Remove this renewal option?',function(){if(!_removeByValue(_settingsRenewals,v))return;saveSettings();renderSettings();},{title:'Remove',okText:'Remove'});}
 function saveCrmName(){var v=document.getElementById('settingsCrmName').value.trim();if(!v)return;_syncedSetItem('crm_display_name',v);document.querySelector('.sidebar .logo').childNodes[0].textContent=v;toast('CRM name updated!','success');}
 
 purgeLegacyAuditLog();
