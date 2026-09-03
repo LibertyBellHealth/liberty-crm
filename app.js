@@ -640,7 +640,13 @@ function parseDiscoveryText(text){
     if(!members[sec])members[sec]={relation:rel};
     members[sec][field]=val;
   }
-  function addMed(str){var s=(str||'').trim();if(!s)return;var p=parseMedLine(s);if(p&&(p.name||p.mg))meds.push(p);}
+  function addMed(str){
+    var s=(str||'').trim();if(!s)return;
+    _splitMedLine(s).forEach(function(part){
+      var p=parseMedLine(part);
+      if(p&&(p.name||p.mg))meds.push(p);
+    });
+  }
   function addDoc(name,specialty){
     var n=(name||'').trim();if(!n)return;
     // parseDoctorLine already splits "Dr. Smith - Cardiology"; the section ('Primary'/'Specialist')
@@ -674,7 +680,7 @@ function parseDiscoveryText(text){
     // Multi-line trigger labels — accept either same-line values OR set collecting mode for following lines
     if(label==='rx'||label==='medications'){
       collecting='rx';
-      if(val){val.split(/[,;\n]/).forEach(function(ln){addMed(ln);});}
+      if(val){_splitMedLine(val).forEach(function(ln){addMed(ln);});}
       continue;
     }
     if(label==='primary dr'||label==='primary doctor'){
@@ -1603,12 +1609,36 @@ function closeMedsPasteModal(){var m=document.getElementById('medsPasteModal');i
      Lisinopril 10 mg once daily
      Atorvastatin - 20mg - at bedtime
      Just a plain name (no dose) → name only */
+/* Strip an ordinary list marker from the front of a pasted line: "1.", "2)", "-", "•", "*".
+   A marker is only a marker when something follows it, and a NUMBER only counts when it is
+   followed by . ) or ] — so "5-HTP 100mg" and "10mg Lipitor" keep their leading digits. */
+function _stripListMarker(s){
+  return s.replace(/^\s*(?:\d+\s*[.)\]]|[-•*\u2022])\s+/,'').trim();
+}
+/* Split a pasted line that holds MORE THAN ONE medication.
+
+   "Metformin 500mg, Lisinopril 10mg" is two medications; "Metformin 500mg, twice daily" is one
+   medication and its frequency. Same punctuation, opposite meanings. The tell is whether what
+   follows the separator carries a dose of its own, so only split when every following part does.
+   Splitting on every comma turned frequencies into medications; splitting on none absorbed a
+   whole medication into the previous one's frequency field. Both were happening, in different
+   places, on the same input. */
+function _splitMedLine(line){
+  var parts=String(line||'').split(/\s*[;,]\s*/).filter(function(p){return p.trim();});
+  if(parts.length<2)return [String(line||'')];
+  var DOSE=/\d+(?:\.\d+)?\s*(mg|mcg|g|units?|iu|ml)\b/i;
+  return parts.slice(1).every(function(p){return DOSE.test(p);}) ? parts : [String(line||'')];
+}
 function parseMedLine(line){
-  var s=line.replace(/[–—]/g,'-').replace(/\s+/g,' ').trim();
+  var s=_stripListMarker(String(line||'').replace(/[–—]/g,'-').replace(/\s+/g,' ').trim());
   if(!s)return null;
-  // Extract dose: number (optionally decimal) with OPTIONAL unit (mg/mcg/g/units/iu/ml).
-  // Unit optional handles inputs like "Metformin 30 twice" — 30 → dose, "twice" → frequency.
-  var doseMatch=s.match(/\b(\d+(?:\.\d+)?)\s*(mg|mcg|g|units?|iu|ml)?\b/i);
+  // Extract the dose. A number WITH a unit wins outright, wherever it sits in the line: taking
+  // the first number instead meant a name containing one ate the dose — "5-HTP 100mg" parsed as
+  // the name "5-HTP 100mg" with no dose, and so did every numbered list line before the marker
+  // above was stripped. Only when no unit appears anywhere do we fall back to a bare number, which
+  // is what makes "Metformin 30 twice" work (30 → dose, "twice" → frequency).
+  var doseMatch=s.match(/\b(\d+(?:\.\d+)?)\s*(mg|mcg|g|units?|iu|ml)\b/i)
+              || s.match(/\b(\d+(?:\.\d+)?)\s*(mg|mcg|g|units?|iu|ml)?\b/i);
   if(!doseMatch)return{name:s.replace(/^-+|-+$/g,'').trim(),mg:'',frequency:''};
   var unit=(doseMatch[2]||'mg').toLowerCase();
   var mg=doseMatch[1]+unit;
@@ -1629,7 +1659,12 @@ function importPastedMeds(){
     if(!vals)row.remove();
   });}
   var added=0;
-  lines.forEach(function(line){var m=parseMedLine(line);if(m&&(m.name||m.mg)){addMedRow(m);added++;}});
+  lines.forEach(function(line){
+    _splitMedLine(line).forEach(function(part){
+      var m=parseMedLine(part);
+      if(m&&(m.name||m.mg)){addMedRow(m);added++;}
+    });
+  });
   closeMedsPasteModal();
   toast('Imported '+added+' medication'+(added===1?'':'s'),'success');
 }
@@ -1637,7 +1672,7 @@ function openDocsPasteModal(){var m=document.getElementById('docsPasteModal');if
 function closeDocsPasteModal(){var m=document.getElementById('docsPasteModal');if(m)m.style.display='none';}
 /* Parse one line into {name, specialty}. First token before a dash/comma/pipe/tab is name; rest joined is specialty. */
 function parseDoctorLine(line){
-  var s=line.replace(/[–—]/g,'-').replace(/\s+/g,' ').trim();
+  var s=_stripListMarker(String(line||'').replace(/[–—]/g,'-').replace(/\s+/g,' ').trim());
   if(!s)return null;
   var m=s.match(/^(.+?)\s*(?:[-,|\t])\s*(.+)$/);
   if(!m)return{name:s,specialty:''};
