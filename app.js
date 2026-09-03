@@ -143,7 +143,17 @@ var msalInstance=null,_apiTokenTimer=null,clients=[],editingId=null,csvHeaders=[
 
 // ── MSAL authentication ────────────────────────────────────────
 function initMSAL(){
-  var config={auth:{clientId:SP_CLIENT_ID,authority:'https://login.microsoftonline.com/'+SP_TENANT_ID,redirectUri:REDIRECT_URI},cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true}};
+  /* sessionStorage, not localStorage: tokens must not outlive the PHI they unlock.
+
+     clearCRMStorage wipes crm_* / crmCarriers / lch_* on sign-out AND on tab close, but it does
+     not touch msal.* — so the roster was being cleared while the access and refresh tokens that
+     fetch it all again were left on disk, surviving a browser restart. The 45-minute idle timeout
+     had the same hole: it signs out this tab, not the stored tokens.
+
+     Cost: tokens are no longer shared across tabs, so a second tab does its own silent
+     acquisition. With storeAuthStateInCookie and a live AAD session that is a redirect, not a
+     password prompt — the same "Verifying authentication…" path the login wall already shows. */
+  var config={auth:{clientId:SP_CLIENT_ID,authority:'https://login.microsoftonline.com/'+SP_TENANT_ID,redirectUri:REDIRECT_URI},cache:{cacheLocation:'sessionStorage',storeAuthStateInCookie:true}};
   msalInstance=new msal.PublicClientApplication(config);
   msalInstance.initialize().then(function(){
     msalInstance.handleRedirectPromise().then(function(resp){
