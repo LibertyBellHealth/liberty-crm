@@ -363,7 +363,7 @@
             <div class="form-section-title">Residential Address</div>
             <div class="fg g4" style="margin-bottom:8px;">
               <div class="field autocomplete-wrap" style="grid-column:span 2;"><label>Address</label><input id="f_resAddress" autocomplete="off"></div>
-              <div class="field"><label>Zip</label><input id="f_resZip" oninput="lookupZip(this,'res',editingId)"></div>
+              <div class="field"><label>Zip</label><input id="f_resZip" oninput="lookupZip(this,'res',recordRef())"></div>
               <div class="field"><label>City</label><input id="f_resCity"></div>
             </div>
             <div class="fg g4">
@@ -394,7 +394,7 @@
               </div>
               <div class="fg g4" style="margin-bottom:8px;">
                 <div class="field autocomplete-wrap" style="grid-column:span 2;"><label>Address</label><input id="f_billAddress" autocomplete="off"></div>
-                <div class="field"><label>Zip</label><input id="f_billZip" oninput="lookupZip(this,'bill',editingId)"></div>
+                <div class="field"><label>Zip</label><input id="f_billZip" oninput="lookupZip(this,'bill',recordRef())"></div>
                 <div class="field"><label>City</label><input id="f_billCity"></div>
               </div>
               <div class="fg g2">

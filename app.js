@@ -41,8 +41,8 @@ var _fullRecordLoading=false;
 var _rowVersion=null;
 // ── "Is this still the record on screen?" ─────────────────────────────────────────────────────
 // Capture the id BEFORE any async gap, then gate the write:
-//     var forId = editingId;
-//     fetch(...).then(function(d){ if(!stillOnRecord(forId)) return; ...write... });
+//     var ref = recordRef();
+//     fetch(...).then(function(d){ if(!stillOnRef(ref)) return; ...write... });
 // editingId can change with NO click on the page — routeFromHash reassigns it on Back/Forward,
 // including while a confirm dialog is open — so every await, .then and timer is a real gap.
 //
@@ -54,6 +54,15 @@ var _rowVersion=null;
 // Null and '' both mean "a new, unsaved record", and they must compare equal: setFormData runs
 // for a blank form too, and a guard that failed closed there would silently drop the writes that
 // populate it.
+// Bumped every time the open record changes, including new -> new. editingId alone cannot tell two
+// UNSAVED records apart (both are null), so a save for one could clear the other's dirty flag.
+var _recordGen=0;
+// Identity of the record open right now, safe to compare across a gap even when it has no id yet.
+function recordRef(){ return {id:(editingId==null?'':editingId),gen:_recordGen}; }
+function stillOnRef(ref){
+  return !!ref && ref.gen===_recordGen && String(ref.id)===String(editingId==null?'':editingId);
+}
+// For records that definitely have an id. Use recordRef/stillOnRef anywhere a new record can occur.
 function stillOnRecord(id){
   try{
     var cur=(editingId==null?'':editingId), want=(id==null?'':id);
@@ -829,10 +838,10 @@ function importDiscoveryPaste(){
   // timer body below writes into the static f_* fields, and 80ms is long enough to reach an
   // existing patient by Back button or deep link — which would paste a stranger's intake data
   // into their record and mark it dirty, ready to be saved over them.
-  var forId=editingId;
+  var forRef=recordRef();
   // Populate — done in a timeout to let the view + starter rows render first
   setTimeout(function(){
-    if(!stillOnRecord(forId)){
+    if(!stillOnRef(forRef)){
       toast('Opened a different record before the paste finished — nothing was imported. Try again.','error');
       return;
     }
@@ -856,7 +865,7 @@ function importDiscoveryPaste(){
     }
     // Trigger age recalc + zip lookup so derived fields fill in
     if(parsed.data.f_dob){try{calcAge();}catch(e){}}
-    if(parsed.data.f_resZip){try{lookupZip(document.getElementById('f_resZip'),'res',forId);}catch(e){}}
+    if(parsed.data.f_resZip){try{lookupZip(document.getElementById('f_resZip'),'res',forRef);}catch(e){}}
     markFormDirty();
     updateMemberCount();
     toast('Imported '+parsed.members.length+' member'+(parsed.members.length===1?'':'s')+' + '+parsed.meds.length+' med'+(parsed.meds.length===1?'':'s')+' + '+parsed.doctors.length+' doctor'+(parsed.doctors.length===1?'':'s'),'success');
@@ -867,6 +876,7 @@ function startNewApp(type){
   if(type==='life'){toast('Life App coming soon!','info');return;}
   try{clearForm();}catch(e){console.log('clearForm error:',e);}
   editingId=null;
+  _recordGen++;
   _rowVersion=null;
   _fullRecordFailed=false;
   _fullRecordLoading=false;
@@ -1298,8 +1308,8 @@ function setFormData(data){
     else{rbEl.value='';_referrerPicked=false;rbEl.style.borderColor='';}
     toggleReferredBy();
   }
-  if(data.f_resZip)restoreCounty(data.f_resZip,'res',data.f_resCounty,editingId);
-  if(data.f_billZip)restoreCounty(data.f_billZip,'bill',data.f_billCounty,editingId);
+  if(data.f_resZip)restoreCounty(data.f_resZip,'res',data.f_resCounty,recordRef());
+  if(data.f_billZip)restoreCounty(data.f_billZip,'bill',data.f_billCounty,recordRef());
   updateMemberCount();checkWaiveDental();calcTotalMonthly();
   if(editingId)renderClientTodos(editingId);
 }
@@ -1314,6 +1324,7 @@ function editClient(id){
   // Deep-link URL so bookmarking / copy-link opens this client next time
   try{if(('#/client/'+id)!==window.location.hash)window.location.hash='/client/'+id;}catch(e){}
   editingId=id;
+  _recordGen++;
   _fullRecordFailed=false;
   _fullRecordLoading=true;   // cleared by whichever branch of the fetch below lands
   _rowVersion=null; // cleared until the full record arrives with the real token
@@ -1428,9 +1439,9 @@ function saveClient(onSuccess){
   // Pin the record this save is FOR. editingId can change while the request is in flight —
   // routeFromHash reassigns it on Back/Forward with no click on the page — and every write in the
   // continuation below was reading it fresh at resolution time.
-  var savedId=editingId;
+  var savedId=editingId, savedRef=recordRef();
   saveClientAPI(data,savedId).then(function(res){
-    var still=stillOnRecord(savedId);
+    var still=stillOnRef(savedRef);
     // Keep the token current so a second save in the same sitting isn't rejected as stale — but
     // only while this is still the open record. The token belongs to the row just written;
     // stamped into the global while someone else is open it becomes THEIR expected_version, and
@@ -2045,7 +2056,7 @@ function bundledCounties(zip){
   var v=ZIP_COUNTIES[zip];if(!v)return null;
   return v.split('|').map(function(s){return s.trim();}).filter(Boolean);
 }
-function lookupZip(el,prefix,forId){
+function lookupZip(el,prefix,forRef){
   var zip=el.value.replace(/\D/g,'');if(zip.length!==5)return;
   fetch('https://api.zippopotam.us/us/'+zip).then(function(r){return r.json();}).then(function(data){
     if(!data.places||!data.places.length)return;
@@ -2053,16 +2064,16 @@ function lookupZip(el,prefix,forId){
     // every patient rather than rebuilt — and getFormData reads them straight back on save. So a
     // lookup that lands after the operator moved on does not merely render wrong: it writes one
     // patient's city, state and county into another patient's record on the next save.
-    if(!stillOnRecord(forId))return;
+    if(!stillOnRef(forRef))return;
     document.getElementById('f_'+prefix+'City').value=data.places[0]['place name']||'';
     document.getElementById('f_'+prefix+'St').value=data.places[0]['state abbreviation']||'';
     var sel=document.getElementById('f_'+prefix+'County');
     var bundled=bundledCounties(zip);
     if(bundled&&bundled.length&&sel){populateCountySel(sel,bundled,null);}
-    else{fetchCountiesForPlaces(data.places,prefix,null,forId);}
+    else{fetchCountiesForPlaces(data.places,prefix,null,forRef);}
   }).catch(function(){});
 }
-function restoreCounty(zip,prefix,saved,forId){
+function restoreCounty(zip,prefix,saved,forRef){
   var z=(zip||'').replace(/\D/g,'');if(z.length!==5)return;
   var sel=document.getElementById('f_'+prefix+'County');
   var bundled=bundledCounties(z);
@@ -2073,13 +2084,13 @@ function restoreCounty(zip,prefix,saved,forId){
     // No guard here: fetchCountiesForPlaces guards its own write, which is the last gap and the
     // only place anything reaches the DOM. A second copy of the check is how the sibling app's
     // convention drifted into two spellings.
-    fetchCountiesForPlaces(data.places,prefix,saved,forId);
+    fetchCountiesForPlaces(data.places,prefix,saved,forRef);
   }).catch(function(){});
 }
 /* Query FCC for EVERY place in a zip (a single zip can span multiple counties),
    dedupe, then present all as options. If only one county is found, it's picked;
    otherwise the user gets a proper dropdown to choose. */
-function fetchCountiesForPlaces(places,prefix,saved,forId){
+function fetchCountiesForPlaces(places,prefix,saved,forRef){
   var sel=document.getElementById('f_'+prefix+'County');if(!sel)return;
   Promise.all(places.map(function(p){
     if(!p.latitude||!p.longitude)return Promise.resolve([]);
@@ -2093,7 +2104,7 @@ function fetchCountiesForPlaces(places,prefix,saved,forId){
     counties.sort();
     // Capturing `sel` above is no protection: the county field is one static element shared by
     // every patient, so the node that was captured IS the node now on screen. The id is the guard.
-    if(!stillOnRecord(forId))return;
+    if(!stillOnRef(forRef))return;
     if(counties.length)populateCountySel(sel,counties,saved);
     else sel.innerHTML='<option value=""></option>';
   });
