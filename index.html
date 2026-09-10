@@ -566,13 +566,17 @@
       <div style="padding:16px;">
         <div class="import-card">
           <h3 style="margin-bottom:8px;">Upload your CSV file</h3>
-          <p style="font-size:12px;color:#666;margin-bottom:12px;">Export from Adobe Pro. First row should be column headers.</p>
+          <p style="font-size:12px;color:#666;margin-bottom:12px;">Export a CSV from your previous system (AgencyBloc) or Adobe Pro. The first row must be column headers.</p>
+          <p style="font-size:12px;color:#666;margin-bottom:12px;"><a href="#" onclick="showView('settings');return false;" style="color:#1a6fc4;">&#8592; Back to Settings</a></p>
           <div class="drop-zone" onclick="document.getElementById('csvFile').click()">Click to select CSV file
             <input type="file" id="csvFile" accept=".csv" style="display:none;" onchange="handleCSV(event)">
           </div>
           <div id="mappingSection" style="display:none;">
             <h3 style="margin-bottom:8px;">Map your columns</h3>
             <table class="mapping-table"><thead><tr><th>CRM Field</th><th>Your CSV Column</th></tr></thead><tbody id="mappingBody"></tbody></table>
+            <p style="font-size:11px;color:#666;margin:8px 0 4px;">Columns marked <span style="color:#b26a00;font-weight:600;">guessed</span> were matched automatically &mdash; check them before importing.</p>
+            <h3 style="margin:14px 0 6px;font-size:13px;">Preview &mdash; first 3 rows as they will be saved</h3>
+            <div id="importPreview" style="overflow-x:auto;font-size:11px;margin-bottom:12px;"></div>
             <button class="btn btn-green" onclick="importClients()">Import Clients</button>
             <span id="importStatus" style="margin-left:10px;font-size:12px;color:#28a745;"></span>
           </div>
@@ -912,15 +916,7 @@
           <div class="form-section">
             <div class="form-section-title">&#8593; Import CSV</div>
             <p style="font-size:11px;color:#666;margin-bottom:12px;">Import clients from a CSV file. First row should be column headers. Export from your previous system or Adobe Pro.</p>
-            <div class="drop-zone" onclick="document.getElementById('csvFileSettings').click()" style="margin-bottom:12px;">Click to select CSV file
-              <input type="file" id="csvFileSettings" accept=".csv" style="display:none;" onchange="handleCSV(event)">
-            </div>
-            <div id="mappingSection" style="display:none;">
-              <h3 style="margin-bottom:8px;font-size:13px;">Map your columns</h3>
-              <table class="mapping-table"><thead><tr><th>CRM Field</th><th>Your CSV Column</th></tr></thead><tbody id="mappingBody"></tbody></table>
-              <button class="btn btn-green" onclick="importClients()">Import Clients</button>
-              <span id="importStatus" style="margin-left:10px;font-size:12px;color:#28a745;"></span>
-            </div>
+            <button class="btn btn-blue" onclick="showView('import')">Open the CSV importer</button>
           </div>
           <div class="form-section">
             <div class="form-section-title">&#128465; Data Management</div>
