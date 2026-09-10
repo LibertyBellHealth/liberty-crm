@@ -33,6 +33,34 @@ var _fullRecordFailed=false; // true when GET /health-clients/{id} failed — bl
 // would silently overwrite someone else's newer edit (409). Null = unconditional write,
 // which is what a brand-new record and any pre-upgrade caller does.
 var _rowVersion=null;
+// ── "Is this still the record on screen?" ─────────────────────────────────────────────────────
+// Capture the id BEFORE any async gap, then gate the write:
+//     var forId = editingId;
+//     fetch(...).then(function(d){ if(!stillOnRecord(forId)) return; ...write... });
+// editingId can change with NO click on the page — routeFromHash reassigns it on Back/Forward,
+// including while a confirm dialog is open — so every await, .then and timer is a real gap.
+//
+// This comparison used to be hand-copied at each site in two spellings. Home Care carried the
+// same convention as two divergent copies before they were consolidated; one definition is the
+// point. Named stillOnRecord, not stillOn, because the sibling app's helper takes (kind, id) and
+// this app has only one kind of record — a same-named, different-arity twin is worse than either.
+//
+// Null and '' both mean "a new, unsaved record", and they must compare equal: setFormData runs
+// for a blank form too, and a guard that failed closed there would silently drop the writes that
+// populate it.
+function stillOnRecord(id){
+  try{
+    var cur=(editingId==null?'':editingId), want=(id==null?'':id);
+    return String(cur)===String(want);
+  }catch(e){ return false; }
+}
+// Runs fn only if `id` is still the record on screen. Returns whether it ran, so a caller can
+// report a skip rather than assume success.
+function whenStillOnRecord(id,fn){
+  if(!stillOnRecord(id))return false;
+  fn();
+  return true;
+}
 function escHtml(v){
   return String(v==null?'':v)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -813,7 +841,7 @@ function importDiscoveryPaste(){
     }
     // Trigger age recalc + zip lookup so derived fields fill in
     if(parsed.data.f_dob){try{calcAge();}catch(e){}}
-    if(parsed.data.f_resZip){try{lookupZip(document.getElementById('f_resZip'),'res');}catch(e){}}
+    if(parsed.data.f_resZip){try{lookupZip(document.getElementById('f_resZip'),'res',editingId);}catch(e){}}
     markFormDirty();
     updateMemberCount();
     toast('Imported '+parsed.members.length+' member'+(parsed.members.length===1?'':'s')+' + '+parsed.meds.length+' med'+(parsed.meds.length===1?'':'s')+' + '+parsed.doctors.length+' doctor'+(parsed.doctors.length===1?'':'s'),'success');
@@ -1254,8 +1282,8 @@ function setFormData(data){
     else{rbEl.value='';_referrerPicked=false;rbEl.style.borderColor='';}
     toggleReferredBy();
   }
-  if(data.f_resZip)restoreCounty(data.f_resZip,'res',data.f_resCounty);
-  if(data.f_billZip)restoreCounty(data.f_billZip,'bill',data.f_billCounty);
+  if(data.f_resZip)restoreCounty(data.f_resZip,'res',data.f_resCounty,editingId);
+  if(data.f_billZip)restoreCounty(data.f_billZip,'bill',data.f_billCounty,editingId);
   updateMemberCount();checkWaiveDental();calcTotalMonthly();
   if(editingId)renderClientTodos(editingId);
 }
@@ -1284,12 +1312,12 @@ function editClient(id){
     .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
     .then(function(row){
       // Ignore if the user navigated to a different record while this was loading
-      if(String(editingId)!==String(id))return;
+      if(!stillOnRecord(id))return;
       _rowVersion=row.row_version_hex||null;
       try{setFormData(dbRowToClient(row));clearFormDirty();}catch(e){console.log('setFormData(full) err:',e);}
     })
     .catch(function(){
-      if(String(editingId)!==String(id))return;
+      if(!stillOnRecord(id))return;
       // Block saving rather than risk writing blanks over real SSN / card / bank values.
       _fullRecordFailed=true;
       toast('Could not load the full record. Sensitive fields are hidden — saving is disabled until you reload.','error');
@@ -1332,11 +1360,11 @@ function loadClientAudit(clientName,forId){
   })
   .then(_apiOk).then(function(r){return r.json();})
   .then(function(rows){
-    if(forId!==undefined&&String(editingId)!==String(forId))return; // see loadClientDocs
+    if(forId!==undefined&&!stillOnRecord(forId))return; // see loadClientDocs
     renderClientAudit(clientName,rows||[]);
   })
   .catch(function(e){
-    if(forId!==undefined&&String(editingId)!==String(forId))return;
+    if(forId!==undefined&&!stillOnRecord(forId))return;
     // Same rule as documents: a failed load must not read as "nothing ever happened".
     sec.innerHTML='<div class="form-section-title">&#128274; Access History</div>'+
       '<p style="font-size:12px;color:#b00;">Could not load the access history ('+
@@ -1374,16 +1402,34 @@ function saveClient(onSuccess){
   // than real. Saving would write those blanks over the stored SSN / card / bank values.
   if(_fullRecordFailed){toast('This record did not fully load. Reload the page before saving to avoid overwriting sensitive fields.','error');return;}
   var isNew=!editingId;
-  saveClientAPI(data,editingId).then(function(res){
-    // Keep the token current so a second save in the same sitting isn't rejected as stale.
-    if(res&&res.row_version)_rowVersion=res.row_version;
-    aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientId:editingId||'new'}); // no PHI in telemetry
+  // Pin the record this save is FOR. editingId can change while the request is in flight —
+  // routeFromHash reassigns it on Back/Forward with no click on the page — and every write in the
+  // continuation below was reading it fresh at resolution time.
+  var savedId=editingId;
+  saveClientAPI(data,savedId).then(function(res){
+    var still=stillOnRecord(savedId);
+    // Keep the token current so a second save in the same sitting isn't rejected as stale — but
+    // only while this is still the open record. The token belongs to the row just written;
+    // stamped into the global while someone else is open it becomes THEIR expected_version, and
+    // the server correctly refuses that save as a conflict against a row it does not match.
+    if(res&&res.row_version&&still)_rowVersion=res.row_version;
+    aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientId:savedId||'new'}); // no PHI in telemetry
     addAuditEntry(_auditName(data),isNew?'Client record created':'Profile information updated');
-    clearFormDirty();
+    // _formDirty is global. Clearing it for a save that resolved after the operator opened a
+    // different patient silences guardUnsavedChanges for THAT patient, whose typed-but-unsaved
+    // edits are then discarded with no warning on the next navigation. This is the real damage
+    // in this continuation — the other two writes are recoverable, that one loses work.
+    if(still)clearFormDirty();
     loadClients();
-    if(typeof onSuccess==='function')onSuccess();
-    else showView('clients');
-    toast('Client saved!','success');
+    // Navigating is also a write of sorts: yanking the operator off a record they have since
+    // opened, mid-edit, is its own kind of data loss.
+    if(still){
+      if(typeof onSuccess==='function')onSuccess();
+      else showView('clients');
+    }
+    // The report of what happened is never suppressed, only named — by now the operator may be
+    // looking at somebody else, and "Client saved!" would be about the wrong person.
+    toast(still?'Client saved!':('Saved '+(_auditName(data)||'that client')+'.'),'success');
   }).catch(function(e){
     if(e&&e.status===409){
       // Someone else saved this record first. Deliberately do NOT clear the dirty flag, do NOT
@@ -1968,15 +2014,6 @@ function populateCountySel(sel,counties,savedVal){
   counties.forEach(function(cn){var o=document.createElement('option');o.value=cn;o.textContent=cn;if(savedVal&&cn===savedVal)o.selected=true;sel.appendChild(o);});
   if(counties.length===1&&!savedVal)sel.options[0].selected=true;
 }
-function fetchCountyByLatLon(lat,lon,prefix,savedVal){
-  var sel=document.getElementById('f_'+prefix+'County');
-  fetch('https://geo.fcc.gov/api/census/area?lat='+lat+'&lon='+lon+'&format=json').then(function(r){return r.json();}).then(function(data){
-    var counties=[];var seen={};
-    if(data&&data.results&&data.results.length>0){data.results.forEach(function(result){if(result.county_name&&!seen[result.county_name]){seen[result.county_name]=true;counties.push(result.county_name);}});}
-    if(counties.length>0){populateCountySel(sel,counties,savedVal);}
-    else{sel.innerHTML='<option value=""></option>';}
-  }).catch(function(){sel.innerHTML='<option value=""></option>';});
-}
 /* Resolve a zip to its county list, preferring the bundled ZIP_COUNTIES dataset
    (accurate multi-county coverage), falling back to FCC lat/lon lookup when the
    zip isn't in the bundle (~9k unlisted zips like some PO-Box-only). */
@@ -1985,32 +2022,41 @@ function bundledCounties(zip){
   var v=ZIP_COUNTIES[zip];if(!v)return null;
   return v.split('|').map(function(s){return s.trim();}).filter(Boolean);
 }
-function lookupZip(el,prefix){
+function lookupZip(el,prefix,forId){
   var zip=el.value.replace(/\D/g,'');if(zip.length!==5)return;
   fetch('https://api.zippopotam.us/us/'+zip).then(function(r){return r.json();}).then(function(data){
     if(!data.places||!data.places.length)return;
+    // f_resCity / f_resSt / f_resCounty are STATIC elements in index.html, cleared and reused for
+    // every patient rather than rebuilt — and getFormData reads them straight back on save. So a
+    // lookup that lands after the operator moved on does not merely render wrong: it writes one
+    // patient's city, state and county into another patient's record on the next save.
+    if(!stillOnRecord(forId))return;
     document.getElementById('f_'+prefix+'City').value=data.places[0]['place name']||'';
     document.getElementById('f_'+prefix+'St').value=data.places[0]['state abbreviation']||'';
     var sel=document.getElementById('f_'+prefix+'County');
     var bundled=bundledCounties(zip);
     if(bundled&&bundled.length&&sel){populateCountySel(sel,bundled,null);}
-    else{fetchCountiesForPlaces(data.places,prefix,null);}
+    else{fetchCountiesForPlaces(data.places,prefix,null,forId);}
   }).catch(function(){});
 }
-function restoreCounty(zip,prefix,saved){
+function restoreCounty(zip,prefix,saved,forId){
   var z=(zip||'').replace(/\D/g,'');if(z.length!==5)return;
   var sel=document.getElementById('f_'+prefix+'County');
   var bundled=bundledCounties(z);
+  // The bundled path is synchronous — no gap, so no guard needed and none added.
   if(bundled&&bundled.length&&sel){populateCountySel(sel,bundled,saved);return;}
   fetch('https://api.zippopotam.us/us/'+z).then(function(r){return r.json();}).then(function(data){
     if(!data.places||!data.places.length)return;
-    fetchCountiesForPlaces(data.places,prefix,saved);
+    // No guard here: fetchCountiesForPlaces guards its own write, which is the last gap and the
+    // only place anything reaches the DOM. A second copy of the check is how the sibling app's
+    // convention drifted into two spellings.
+    fetchCountiesForPlaces(data.places,prefix,saved,forId);
   }).catch(function(){});
 }
 /* Query FCC for EVERY place in a zip (a single zip can span multiple counties),
    dedupe, then present all as options. If only one county is found, it's picked;
    otherwise the user gets a proper dropdown to choose. */
-function fetchCountiesForPlaces(places,prefix,saved){
+function fetchCountiesForPlaces(places,prefix,saved,forId){
   var sel=document.getElementById('f_'+prefix+'County');if(!sel)return;
   Promise.all(places.map(function(p){
     if(!p.latitude||!p.longitude)return Promise.resolve([]);
@@ -2022,6 +2068,9 @@ function fetchCountiesForPlaces(places,prefix,saved){
     var seen={},counties=[];
     arrs.forEach(function(a){a.forEach(function(c){if(!seen[c]){seen[c]=true;counties.push(c);}});});
     counties.sort();
+    // Capturing `sel` above is no protection: the county field is one static element shared by
+    // every patient, so the node that was captured IS the node now on screen. The id is the guard.
+    if(!stillOnRecord(forId))return;
     if(counties.length)populateCountySel(sel,counties,saved);
     else sel.innerHTML='<option value=""></option>';
   });
@@ -3092,11 +3141,11 @@ function loadClientDocs(clientId){
     // #clientDocsSection is a SHARED element rebuilt per record — so a late response would render
     // one client's document list (filenames routinely contain a patient's name) under another
     // client's name. editClient already guards its own fetch this way; the sections did not.
-    if(String(editingId)!==String(clientId))return;
+    if(!stillOnRecord(clientId))return;
     _clientDocs=docs||[];renderClientDocs(clientId,docs);
   })
   .catch(function(){
-    if(String(editingId)!==String(clientId))return;
+    if(!stillOnRecord(clientId))return;
     // A FAILED load must never render as "no documents yet" — indistinguishable from genuinely
     // empty, and the agent then re-uploads a document that is already there.
     _clientDocs=[];
@@ -3173,7 +3222,7 @@ function uploadClientDoc(clientId){
     // is on screen, so those writes are guarded. The toast is not: it is global, and an upload
     // that did not save is not something to let the agent discover later just because they
     // navigated away while it was in flight.
-    var stillOpen=String(editingId)===String(clientId);
+    var stillOpen=stillOnRecord(clientId);
     var failed=results.filter(function(x){return !x.ok;});
     var okCount=results.length-failed.length;
     // fileCount was `fileNames.length` on a JOINED STRING — it has always reported the character
