@@ -825,8 +825,17 @@ function importDiscoveryPaste(){
   closeDiscoveryPasteModal();
   // Boot up a new health app (clears form, opens edit view)
   startNewApp('health');
+  // startNewApp opened a BLANK record, so that is what this paste is for. Capture it: the whole
+  // timer body below writes into the static f_* fields, and 80ms is long enough to reach an
+  // existing patient by Back button or deep link — which would paste a stranger's intake data
+  // into their record and mark it dirty, ready to be saved over them.
+  var forId=editingId;
   // Populate — done in a timeout to let the view + starter rows render first
   setTimeout(function(){
+    if(!stillOnRecord(forId)){
+      toast('Opened a different record before the paste finished — nothing was imported. Try again.','error');
+      return;
+    }
     Object.keys(parsed.data).forEach(function(k){
       var el=document.getElementById(k);if(!el)return;
       if(el.type==='checkbox')el.checked=!!parsed.data[k];else el.value=parsed.data[k];
@@ -847,7 +856,7 @@ function importDiscoveryPaste(){
     }
     // Trigger age recalc + zip lookup so derived fields fill in
     if(parsed.data.f_dob){try{calcAge();}catch(e){}}
-    if(parsed.data.f_resZip){try{lookupZip(document.getElementById('f_resZip'),'res',editingId);}catch(e){}}
+    if(parsed.data.f_resZip){try{lookupZip(document.getElementById('f_resZip'),'res',forId);}catch(e){}}
     markFormDirty();
     updateMemberCount();
     toast('Imported '+parsed.members.length+' member'+(parsed.members.length===1?'':'s')+' + '+parsed.meds.length+' med'+(parsed.meds.length===1?'':'s')+' + '+parsed.doctors.length+' doctor'+(parsed.doctors.length===1?'':'s'),'success');

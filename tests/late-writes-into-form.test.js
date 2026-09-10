@@ -204,3 +204,34 @@ test('a late save does not navigate you off the record you have since opened', a
   assert.deepStrictEqual(h.views, [],
     "A's save sent the operator back to the client list, mid-edit on B — navigation is a write too");
 });
+
+// The discovery paste opens a BLANK record and then populates it 80ms later, to let the view and
+// the starter rows render first. The whole timer body writes into the static f_* fields. 80ms is
+// long enough to reach an existing patient by Back button or deep link — and the paste would then
+// land in THEIR form and mark it dirty, ready to be saved over them.
+test('a discovery paste does not land in a patient you opened while it was pending', async () => {
+  const w = loadApp();
+  resetStorage(w);
+  const el = form(w);
+  const toasts = [];
+  stub(w, {
+    startNewApp: () => { w.eval('editingId=null;'); },
+    closeDiscoveryPasteModal: () => {},
+    markFormDirty: () => {},
+    updateMemberCount: () => {},
+    toast: (m) => toasts.push(String(m)),
+  });
+  if (!w.document.getElementById('discoveryPasteInput')) {
+    w.document.body.insertAdjacentHTML('beforeend', '<textarea id="discoveryPasteInput"></textarea>');
+  }
+  w.document.getElementById('discoveryPasteInput').value = 'Name- Ada Lovelace\nDOB- 1815-12-10';
+
+  w.importDiscoveryPaste();          // blank record opened, paste scheduled
+  w.eval('editingId="B";');          // operator navigates to a real patient
+  await new Promise((r) => setTimeout(r, 120));
+
+  assert.strictEqual(el('f_firstName').value, '',
+    "the pasted intake data was written into patient B's form and would save onto them");
+  assert.ok(toasts.some((t) => /different record/i.test(t)),
+    'discarding the paste silently is its own failure — say so: ' + JSON.stringify(toasts));
+});
