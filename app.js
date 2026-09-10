@@ -2389,8 +2389,8 @@ function _importMappings(){
 }
 // Build the record for one CSV row exactly as the import will send it, so the preview cannot
 // disagree with what gets written.
-function _importRowToData(row){
-  var m=_importMappings(),data={};
+function _importRowToData(row,mapping){
+  var m=mapping||_importMappings(),data={};
   CRM_IMPORT_FIELDS.forEach(function(f){
     var col=m[f.key];
     if(col&&row[col]!==undefined)data[f.key]=row[col];
@@ -2440,13 +2440,14 @@ function handleCSV(event){
 }
 var IMPORT_BATCH_SIZE=500;      // the server's documented per-batch limit
 var _importFailedRows=[];       // rows from batches that rolled back, so they can be retried
+var _importFailedMapping=null;  // the mapping those rows were confirmed under
 // Post one batch through the TRANSACTIONAL bulk endpoint. Previously every row was its own
 // POST and all of them were fired at once: a thousand-record import meant a thousand concurrent
 // requests, each doing a Key Vault encrypt per protected column. What that produced was throttled
 // requests counted as "failed" — i.e. silently skipped patients — with no record of which ones.
 // One batch is one server-side transaction: it lands whole or not at all.
-function _importBatch(rows){
-  var payload=rows.map(function(r){return clientToDbRow(_importRowToData(r));});
+function _importBatch(rows,mapping){
+  var payload=rows.map(function(r){return clientToDbRow(_importRowToData(r,mapping));});
   return fetch(API_BASE+'/health-clients/bulk',{method:'POST',headers:apiHeaders(),body:JSON.stringify(payload)})
     .then(_apiOk).then(function(r){return r.json();});
 }
@@ -2462,20 +2463,25 @@ function importClients(){
   var skipped=CRM_IMPORT_FIELDS.filter(function(f){return !m[f.key];}).map(function(f){return f.label;});
   if(skipped.length)lines.push('','Left empty: '+skipped.join(', '));
   lines.push('','Importing does not overwrite existing patients — it adds new ones.');
-  showConfirm(lines.join('\n'),function(){_doImportClients(csvData);},
-    {title:'Confirm import',okText:'Import '+csvData.length,danger:false});
+  // Capture the rows AND the mapping BEFORE the dialog. Both were read inside the callback, i.e.
+  // at OK-press time, and the mapping was re-read from the DOM again for every batch — so a
+  // mapping edited part-way through an import would silently apply to the remaining batches only.
+  // That is the same defect this file has been fixing elsewhere: a decision made after an async
+  // gap must not re-derive its inputs from live state.
+  var rows=csvData.slice(), mapping=m;
+  showConfirm(lines.join('\n'),function(){_doImportClients(rows,mapping);},
+    {title:'Confirm import',okText:'Import '+rows.length,danger:false});
 }
 function retryFailedImportRows(){
   if(!_importFailedRows.length)return;
-  var rows=_importFailedRows.slice();
+  var rows=_importFailedRows.slice(),mapping=_importFailedMapping;
   _importFailedRows=[];
-  _doImportClients(rows);
+  _doImportClients(rows,mapping);   // the mapping that was confirmed, not whatever is on screen now
 }
-function _doImportClients(rows){
+function _doImportClients(rows,mapping){
   var el=document.getElementById('importStatus');
   var total=rows.length,imported=0,failures=[];
-  _importFailedRows=[];
-  try{logActivity('import',total+' client records imported from CSV by '+currentUserEmail());}catch(e){}
+  _importFailedRows=[];_importFailedMapping=mapping;
   var batches=[];
   for(var i=0;i<total;i+=IMPORT_BATCH_SIZE)batches.push({start:i,rows:rows.slice(i,i+IMPORT_BATCH_SIZE)});
   // Sequential, not Promise.all: batches share one connection pool, and a failure part-way
@@ -2483,7 +2489,7 @@ function _doImportClients(rows){
   batches.reduce(function(chain,b){
     return chain.then(function(){
       if(el)el.textContent='Importing '+(b.start+1)+'\u2013'+(b.start+b.rows.length)+' of '+total+'\u2026';
-      return _importBatch(b.rows).then(function(res){
+      return _importBatch(b.rows,mapping).then(function(res){
         imported+=(res&&typeof res.inserted==='number')?res.inserted:b.rows.length;
       },function(e){
         // The batch rolled back server-side, so every row in it is unimported. Report them by
@@ -2494,6 +2500,9 @@ function _doImportClients(rows){
       });
     });
   },Promise.resolve()).then(function(){
+    // Logged AFTER the run, with the count that actually committed. Logging the attempted total up
+    // front recorded "N records imported" even when every batch rolled back and nothing landed.
+    try{logActivity('import',imported+' of '+total+' client records imported from CSV by '+currentUserEmail());}catch(e){}
     if(el){
       el.innerHTML='';
       if(failures.length){

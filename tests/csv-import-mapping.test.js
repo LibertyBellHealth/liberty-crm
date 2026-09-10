@@ -175,3 +175,77 @@ test('a rolled-back batch names the file lines that did not import, and can be r
     'exactly the rolled-back rows should be held for retry');
   assert.strictEqual(w._importFailedRows[0]['First Name'], 'A');
 });
+
+// The import itself had the defect it exists to prevent: the mapping was read from the DOM afresh
+// for every batch, and the row set was read inside the confirm callback rather than captured. A
+// mapping edited part-way through a long import would silently apply to the remaining batches.
+test('a mapping changed mid-import does not affect the batches still to go', async () => {
+  const w = app();
+  const headers = ['First Name', 'Other'];
+  load(w, headers, [{ 'First Name': 'A', Other: 'wrong-1' }, { 'First Name': 'B', Other: 'wrong-2' }]);
+  w.renderCsvMapping(headers);
+  w.IMPORT_BATCH_SIZE = 1;
+  const sent = [];
+  stub(w, { fetch: (url, opt) => {
+    if (String(url).endsWith('/health-clients/bulk')) {
+      sent.push(JSON.parse(opt.body));
+      // Between batch one and batch two, the mapping on screen changes.
+      w.document.getElementById('map_f_firstName').value = 'Other';
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ inserted: 1, ids: [1] }) });
+  } });
+
+  w.importClients(); confirmOk(w);
+  await settle(); await settle(); await settle();
+
+  assert.strictEqual(sent.length, 2, 'expected two batches, got ' + sent.length);
+  assert.strictEqual(sent[1][0].first_name, 'B',
+    'the second batch must use the mapping that was confirmed, not the one now on screen');
+});
+
+test('the audit entry records what actually imported, not what was attempted', async () => {
+  const w = app();
+  const headers = ['First Name'];
+  load(w, headers, [{ 'First Name': 'A' }, { 'First Name': 'B' }]);
+  w.renderCsvMapping(headers);
+  const logged = [];
+  stub(w, {
+    logActivity: (type, text) => { logged.push(text); },
+    fetch: () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'Server error. Please try again.' }) }),
+  });
+
+  w.importClients(); confirmOk(w);
+  await settle(); await settle(); await settle();
+
+  assert.strictEqual(logged.length, 1, 'expected exactly one audit entry, got ' + logged.length);
+  assert.ok(logged[0].startsWith('0 of 2'),
+    'nothing committed, so the audit row must not claim 2 were imported — got: ' + logged[0]);
+});
+
+test('retrying failed rows reuses the confirmed mapping, not whatever is on screen', async () => {
+  const w = app();
+  const headers = ['First Name', 'Other'];
+  load(w, headers, [{ 'First Name': 'A', Other: 'wrong' }]);
+  w.renderCsvMapping(headers);
+  let call = 0;
+  const sent = [];
+  stub(w, { fetch: (url, opt) => {
+    if (!String(url).endsWith('/health-clients/bulk')) return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    call++;
+    sent.push(JSON.parse(opt.body));
+    if (call === 1) return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ inserted: 1, ids: [7] }) });
+  } });
+
+  w.importClients(); confirmOk(w);
+  await settle(); await settle();
+  assert.strictEqual(w._importFailedRows.length, 1);
+
+  w.document.getElementById('map_f_firstName').value = 'Other';   // operator fiddles after the failure
+  w.retryFailedImportRows();
+  await settle(); await settle();
+
+  assert.strictEqual(sent.length, 2, 'the retry should have re-sent the failed row');
+  assert.strictEqual(sent[1][0].first_name, 'A',
+    'the retry must use the mapping the rows were confirmed under');
+});
