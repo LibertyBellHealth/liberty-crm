@@ -2255,7 +2255,7 @@ var CRM_IMPORT_FIELDS=[
   {key:'f_firstName',label:'First Name'},{key:'f_lastName',label:'Last Name'},
   {key:'f_dob',label:'Date of Birth'},{key:'f_gender',label:'Gender'},
   // Full SSN is no longer returned by the list endpoint, so reports export the last 4 only.
-  {key:'f_ssnLast4',label:'SSN (last 4)'},
+  {key:'f_ssn',label:'SSN'},
   {key:'f_phone',label:'Phone'},{key:'f_email',label:'Email'},{key:'f_resAddress',label:'Address'},
   {key:'f_resCity',label:'City'},{key:'f_resSt',label:'State'},{key:'f_resZip',label:'Zip'},
   {key:'f_planName',label:'Plan Name'},{key:'f_planType',label:'Plan Type'},{key:'f_premium',label:'Premium'},
@@ -2304,6 +2304,48 @@ function parseCSV(text){
 /* Column-mapping table. The option labels are the CSV's OWN header names — text from a file
    someone was sent — and they used to be concatenated into markup raw, so a header like
    <img src=x onerror=...> became a real element. Built as nodes now; nothing is parsed as HTML. */
+// Header wordings that mean the same CRM field but share no prefix with its label.
+var _IMPORT_SYNONYMS={
+  f_firstName:['first','fname','givenname'],
+  f_lastName:['last','lname','surname','familyname'],
+  f_dob:['dob','birthdate','birthday','dateofbirth'],
+  f_resAddress:['address','address1','street','streetaddress','mailingaddress'],
+  f_resCity:['city','town'],
+  f_resSt:['state','st','province'],
+  f_resZip:['zip','zipcode','postalcode','postcode'],
+  f_phone:['phone','phonenumber','homephone','cellphone','mobile','primaryphone'],
+  f_email:['email','emailaddress','e-mail'],
+  f_ssn:['ssn','socialsecurity','socialsecuritynumber'],
+  f_gender:['gender','sex'],
+  f_agent:['agent','writingagent','producer'],
+  f_leadSource:['leadsource','source','referralsource'],
+  f_medicareNum:['medicare','medicarenumber','mbi'],
+  f_medicaid:['medicaid','medicaidnumber','medicaidid'],
+  f_notes:['notes','note','comments','remarks']
+};
+var _norm=function(v){return String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,'');};
+// How well a CSV header matches a CRM field. Higher is better; 0 means "do not guess".
+//
+// The old rule took the label's first four letters and selected EVERY header containing them,
+// so the LAST match won: "Date of Birth" -> "date" matched "Lead Date", "Effective Date" and
+// "Application Date", and a DOB column silently arrived from whichever came last. Across a
+// thousand patient records that is a scrambled dataset with no error anywhere. Now the single
+// best-scoring header wins, ties keep the first, and a weak match is left unmapped rather than
+// guessed at.
+function _mapScore(header,field){
+  var h=_norm(header), l=_norm(field.label);
+  if(!h||!l)return 0;
+  if(h===l)return 100;
+  var syn=_IMPORT_SYNONYMS[field.key]||[];
+  for(var i=0;i<syn.length;i++){ var sv=_norm(syn[i]); if(h===sv)return 95; }
+  // Prefix-match a synonym only when it is long enough to mean something. 'st' would otherwise
+  // claim 'Status' for the State field — the same class of over-eager match this rule replaced.
+  for(var j=0;j<syn.length;j++){ var sj=_norm(syn[j]); if(sj.length>=4&&h.indexOf(sj)===0)return 80; }
+  if(h.indexOf(l)===0)return 70;                       // header starts with the label
+  if(l.indexOf(h)===0&&h.length>=4)return 60;          // label starts with the header
+  if(h.indexOf(l)>=0&&l.length>=4)return 50;           // header contains the whole label
+  return 0;                                            // too weak — leave it to the operator
+}
 function renderCsvMapping(headers){
   var tbody=document.getElementById('mappingBody');if(!tbody)return;
   tbody.innerHTML='';
@@ -2312,19 +2354,76 @@ function renderCsvMapping(headers){
     var labelTd=document.createElement('td');labelTd.textContent=f.label;
     var selTd=document.createElement('td');
     var sel=document.createElement('select');sel.id='map_'+f.key;
+    sel.onchange=function(){this.dataset.guessed='';renderImportPreview();};
     var skip=document.createElement('option');skip.value='';skip.textContent='-- Skip --';
     sel.appendChild(skip);
-    var want=f.label.toLowerCase().replace(/[^a-z]/g,'').substr(0,4);
+    var best=null,bestScore=0;
     (headers||[]).forEach(function(h){
       var o=document.createElement('option');
       o.value=h;o.textContent=h;
-      if(String(h).toLowerCase().replace(/[^a-z]/g,'').includes(want))o.selected=true;
       sel.appendChild(o);
+      var sc=_mapScore(h,f);
+      if(sc>bestScore){bestScore=sc;best=h;}   // strictly greater: ties keep the FIRST header
     });
+    if(best!==null){sel.value=best;sel.dataset.guessed=bestScore<100?'1':'';}
     selTd.appendChild(sel);
+    if(best!==null&&bestScore<100){
+      var tag=document.createElement('span');
+      tag.textContent=' guessed';
+      tag.style.cssText='color:#b26a00;font-weight:600;font-size:11px;margin-left:6px;';
+      selTd.appendChild(tag);
+    }
     tr.appendChild(labelTd);tr.appendChild(selTd);
     tbody.appendChild(tr);
   });
+  renderImportPreview();
+}
+// The mapping the operator is actually looking at: {fieldKey: csvColumn} for mapped fields only.
+function _importMappings(){
+  var m={};
+  CRM_IMPORT_FIELDS.forEach(function(f){
+    var sel=document.getElementById('map_'+f.key);
+    if(sel&&sel.value)m[f.key]=sel.value;
+  });
+  return m;
+}
+// Build the record for one CSV row exactly as the import will send it, so the preview cannot
+// disagree with what gets written.
+function _importRowToData(row,mapping){
+  var m=mapping||_importMappings(),data={};
+  CRM_IMPORT_FIELDS.forEach(function(f){
+    var col=m[f.key];
+    if(col&&row[col]!==undefined)data[f.key]=row[col];
+  });
+  data.f_agent=data.f_agent||'Thomas Jaboro';
+  return data;
+}
+function renderImportPreview(){
+  var host=document.getElementById('importPreview');if(!host)return;
+  host.innerHTML='';
+  var m=_importMappings(),keys=Object.keys(m);
+  if(!keys.length){host.textContent='No columns mapped yet.';return;}
+  if(!csvData.length){host.textContent='No rows to preview.';return;}
+  var table=document.createElement('table');table.className='mapping-table';
+  var thead=document.createElement('thead'),hr=document.createElement('tr');
+  keys.forEach(function(k){
+    var th=document.createElement('th');
+    var f=CRM_IMPORT_FIELDS.filter(function(x){return x.key===k;})[0];
+    th.textContent=(f?f.label:k);
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);table.appendChild(thead);
+  var tb=document.createElement('tbody');
+  csvData.slice(0,3).forEach(function(row){
+    var data=_importRowToData(row),tr=document.createElement('tr');
+    keys.forEach(function(k){
+      var td=document.createElement('td');
+      td.textContent=data[k]===undefined?'':String(data[k]);
+      tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  });
+  table.appendChild(tb);host.appendChild(table);
 }
 function handleCSV(event){
   var file=event.target.files[0];if(!file)return;
@@ -2339,26 +2438,88 @@ function handleCSV(event){
   reader.onerror=function(){toast('Could not read that file.','error');};
   reader.readAsText(file);
 }
+var IMPORT_BATCH_SIZE=500;      // the server's documented per-batch limit
+var _importFailedRows=[];       // rows from batches that rolled back, so they can be retried
+var _importFailedMapping=null;  // the mapping those rows were confirmed under
+// Post one batch through the TRANSACTIONAL bulk endpoint. Previously every row was its own
+// POST and all of them were fired at once: a thousand-record import meant a thousand concurrent
+// requests, each doing a Key Vault encrypt per protected column. What that produced was throttled
+// requests counted as "failed" — i.e. silently skipped patients — with no record of which ones.
+// One batch is one server-side transaction: it lands whole or not at all.
+function _importBatch(rows,mapping){
+  var payload=rows.map(function(r){return clientToDbRow(_importRowToData(r,mapping));});
+  return fetch(API_BASE+'/health-clients/bulk',{method:'POST',headers:apiHeaders(),body:JSON.stringify(payload)})
+    .then(_apiOk).then(function(r){return r.json();});
+}
 function importClients(){
-  // `.then(function(){imported++;})` counted every row as imported, because saveClientAPI
-  // never rejected — a CSV where every row 500'd still reported "Imported 40 clients!".
-  // Failures are counted separately, and the per-row rejection handler means one bad row
-  // no longer aborts the rows after it.
-  var imported=0,failed=0,firstError='';
-  var promises=csvData.map(function(row){
-    var data={};CRM_IMPORT_FIELDS.forEach(function(f){var col=document.getElementById('map_'+f.key);if(col&&col.value&&row[col.value]!==undefined)data[f.key]=row[col.value];});
-    data.f_agent=data.f_agent||'Thomas Jaboro';
-    return saveClientAPI(data,null).then(function(){imported++;},function(e){
-      failed++;if(!firstError)firstError=String(e&&e.message||e);
+  if(!csvData.length){toast('No rows to import.','error');return;}
+  var m=_importMappings();
+  if(!Object.keys(m).length){toast('Map at least one column before importing.','error');return;}
+  // Show the operator exactly what is about to be written, field by field. The mapping is partly
+  // guessed, the guesses are not always right, and after import a wrong column is indistinguishable
+  // from data the patient actually gave us — so this is the last point at which it can be caught.
+  var lines=['Import '+csvData.length+' record'+(csvData.length===1?'':'s')+'.','','Columns being imported:'];
+  CRM_IMPORT_FIELDS.forEach(function(f){ if(m[f.key])lines.push('   '+f.label+'  \u2190  '+m[f.key]); });
+  var skipped=CRM_IMPORT_FIELDS.filter(function(f){return !m[f.key];}).map(function(f){return f.label;});
+  if(skipped.length)lines.push('','Left empty: '+skipped.join(', '));
+  lines.push('','Importing does not overwrite existing patients — it adds new ones.');
+  // Capture the rows AND the mapping BEFORE the dialog. Both were read inside the callback, i.e.
+  // at OK-press time, and the mapping was re-read from the DOM again for every batch — so a
+  // mapping edited part-way through an import would silently apply to the remaining batches only.
+  // That is the same defect this file has been fixing elsewhere: a decision made after an async
+  // gap must not re-derive its inputs from live state.
+  var rows=csvData.slice(), mapping=m;
+  showConfirm(lines.join('\n'),function(){_doImportClients(rows,mapping);},
+    {title:'Confirm import',okText:'Import '+rows.length,danger:false});
+}
+function retryFailedImportRows(){
+  if(!_importFailedRows.length)return;
+  var rows=_importFailedRows.slice(),mapping=_importFailedMapping;
+  _importFailedRows=[];
+  _doImportClients(rows,mapping);   // the mapping that was confirmed, not whatever is on screen now
+}
+function _doImportClients(rows,mapping){
+  var el=document.getElementById('importStatus');
+  var total=rows.length,imported=0,failures=[];
+  _importFailedRows=[];_importFailedMapping=mapping;
+  var batches=[];
+  for(var i=0;i<total;i+=IMPORT_BATCH_SIZE)batches.push({start:i,rows:rows.slice(i,i+IMPORT_BATCH_SIZE)});
+  // Sequential, not Promise.all: batches share one connection pool, and a failure part-way
+  // through should not be racing the batches behind it.
+  batches.reduce(function(chain,b){
+    return chain.then(function(){
+      if(el)el.textContent='Importing '+(b.start+1)+'\u2013'+(b.start+b.rows.length)+' of '+total+'\u2026';
+      return _importBatch(b.rows,mapping).then(function(res){
+        imported+=(res&&typeof res.inserted==='number')?res.inserted:b.rows.length;
+      },function(e){
+        // The batch rolled back server-side, so every row in it is unimported. Report them by
+        // FILE line number (+2: one for the header row, one for 1-based counting) rather than a
+        // bare count, which left no way to tell which patients were missing.
+        failures.push({from:b.start+2,to:b.start+b.rows.length+1,error:String((e&&e.message)||e)});
+        _importFailedRows=_importFailedRows.concat(b.rows);
+      });
     });
-  });
-  Promise.all(promises).then(function(){
-    var el=document.getElementById('importStatus');
-    if(failed){
-      el.textContent='Imported '+imported+', FAILED '+failed+(firstError?(' — first error: '+firstError):'');
-      toast(failed+' row'+(failed===1?'':'s')+' failed to import.','error');
-    }else{
-      el.textContent='Imported '+imported+' clients!';
+  },Promise.resolve()).then(function(){
+    // Logged AFTER the run, with the count that actually committed. Logging the attempted total up
+    // front recorded "N records imported" even when every batch rolled back and nothing landed.
+    try{logActivity('import',imported+' of '+total+' client records imported from CSV by '+currentUserEmail());}catch(e){}
+    if(el){
+      el.innerHTML='';
+      if(failures.length){
+        var ranges=failures.map(function(f){return f.from===f.to?('line '+f.from):('lines '+f.from+'\u2013'+f.to);}).join('; ');
+        el.style.color='#b00';
+        el.textContent='Imported '+imported+' of '+total+'. NOT imported: '+ranges+' \u2014 '+failures[0].error;
+        var btn=document.createElement('button');
+        btn.className='btn btn-blue';btn.style.marginLeft='8px';
+        btn.textContent='Retry '+_importFailedRows.length+' failed row'+(_importFailedRows.length===1?'':'s');
+        btn.onclick=retryFailedImportRows;
+        el.appendChild(btn);
+        toast(_importFailedRows.length+' row'+(_importFailedRows.length===1?'':'s')+' did not import.','error');
+      }else{
+        el.style.color='#28a745';
+        el.textContent='Imported '+imported+' client'+(imported===1?'':'s')+'.';
+        toast('Imported '+imported+' client'+(imported===1?'':'s')+'.','success');
+      }
     }
     loadClients();
   });
