@@ -28,6 +28,12 @@ var ALLOWED_USERS = [
    quoted attribute values. Client data reaches the DOM from paste-import and CSV,
    so it is never safe to concatenate raw. Use textContent where practical instead. */
 var _fullRecordFailed=false; // true when GET /health-clients/{id} failed — blocks save
+// True between opening a record and its full row arriving. _fullRecordFailed covered the FAILURE
+// case, but nothing covered the window while the fetch is still in flight — and in that window the
+// form holds the LIST row, which deliberately omits ssn, card, routing and account. A save there
+// wrote those blanks over real stored values, and went out with no expected_version because
+// _rowVersion had not arrived either, so it also skipped the lost-update check.
+var _fullRecordLoading=false;
 // Optimistic-concurrency token for the record currently open in the form. Read from
 // GET /health-clients/{id} and sent back on save, so the server can refuse a write that
 // would silently overwrite someone else's newer edit (409). Null = unconditional write,
@@ -854,6 +860,7 @@ function startNewApp(type){
   editingId=null;
   _rowVersion=null;
   _fullRecordFailed=false;
+  _fullRecordLoading=false;
   try{addDoctorRow();}catch(e){}
   try{addMedRow();}catch(e){}
   try{loadCarriersToSelect();}catch(e){}
@@ -1299,6 +1306,7 @@ function editClient(id){
   try{if(('#/client/'+id)!==window.location.hash)window.location.hash='/client/'+id;}catch(e){}
   editingId=id;
   _fullRecordFailed=false;
+  _fullRecordLoading=true;   // cleared by whichever branch of the fetch below lands
   _rowVersion=null; // cleared until the full record arrives with the real token
   try{clearForm();}catch(e){console.log('clearForm err:',e);}
   try{loadCarriersToSelect();}catch(e){}
@@ -1313,12 +1321,17 @@ function editClient(id){
     .then(function(row){
       // Ignore if the user navigated to a different record while this was loading
       if(!stillOnRecord(id))return;
+      _fullRecordLoading=false;
       _rowVersion=row.row_version_hex||null;
       try{setFormData(dbRowToClient(row));clearFormDirty();}catch(e){console.log('setFormData(full) err:',e);}
     })
     .catch(function(){
       if(!stillOnRecord(id))return;
       // Block saving rather than risk writing blanks over real SSN / card / bank values.
+      // Not what blocks the save on this path — _fullRecordFailed below does that, and no test
+      // can tell this line apart because of it. It is here so the flag stops claiming a load is
+      // still in flight when it has already failed.
+      _fullRecordLoading=false;
       _fullRecordFailed=true;
       toast('Could not load the full record. Sensitive fields are hidden — saving is disabled until you reload.','error');
     });
@@ -1401,6 +1414,7 @@ function saveClient(onSuccess){
   // If the full record never loaded, the sensitive fields on screen are blank rather
   // than real. Saving would write those blanks over the stored SSN / card / bank values.
   if(_fullRecordFailed){toast('This record did not fully load. Reload the page before saving to avoid overwriting sensitive fields.','error');return;}
+  if(_fullRecordLoading){toast('Still loading this record — give it a moment before saving.','info');return;}
   var isNew=!editingId;
   // Pin the record this save is FOR. editingId can change while the request is in flight —
   // routeFromHash reassigns it on Back/Forward with no click on the page — and every write in the
@@ -3129,7 +3143,6 @@ function clearPreviewData(){
 }
 
 // ===================== DOCUMENT UPLOAD =====================
-var _clientDocs=[];
 function loadClientDocs(clientId){
   var sec=document.getElementById('clientDocsSection');
   if(!sec)return;
@@ -3142,13 +3155,12 @@ function loadClientDocs(clientId){
     // one client's document list (filenames routinely contain a patient's name) under another
     // client's name. editClient already guards its own fetch this way; the sections did not.
     if(!stillOnRecord(clientId))return;
-    _clientDocs=docs||[];renderClientDocs(clientId,docs);
+    renderClientDocs(clientId,docs);
   })
   .catch(function(){
     if(!stillOnRecord(clientId))return;
     // A FAILED load must never render as "no documents yet" — indistinguishable from genuinely
     // empty, and the agent then re-uploads a document that is already there.
-    _clientDocs=[];
     var sec=document.getElementById('clientDocsSection');
     if(sec)sec.innerHTML='<div class="form-section-title">&#128196; Client Documents</div>'+
       '<p style="font-size:12px;color:#b00;">Could not load documents. '+
