@@ -122,6 +122,10 @@ test('nothing is written until the operator confirms the mapping', async () => {
   } });
 
   w.importClients();
+  // Must settle first: the batch chain starts from Promise.resolve(), so the first POST is a
+  // microtask away whether or not the confirm gate exists. Asserting synchronously tested the
+  // scheduling, not the gate.
+  await settle(); await settle();
   assert.strictEqual(calls, 0, 'the import must not write before the confirm is accepted');
 
   confirmOk(w);

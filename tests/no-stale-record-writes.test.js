@@ -29,7 +29,7 @@ const RECORD_GLOBALS = new Set(['editingId', '_rowVersion', '_fullRecordFailed',
 const GAP_CALLEES = new Set(['setTimeout', 'setInterval', 'requestAnimationFrame', 'showConfirm', 'showPrompt', 'queueMicrotask']);
 const GAP_METHODS = new Set(['then', 'catch', 'finally']);
 const HANDLER_PROPS = new Set(['onload', 'onerror', 'onloadend', 'onreadystatechange']);
-const GUARDS = new Set(['stillOnRecord', 'whenStillOnRecord']);
+const GUARDS = new Set(['stillOnRecord', 'stillOnRef']);
 
 // Functions allowed to break each rule. Both empty on purpose — see the header.
 const ALLOWED_GLOBAL_READ = {};
@@ -78,11 +78,21 @@ function analyze(src) {
     return !!(inner && inner.async && awaitsByFn.has(inner) && awaitsByFn.get(inner).some((s) => s < start));
   };
 
-  // Which functions ask the question at all.
-  const guarded = new Set();
-  walk.ancestor(ast, { CallExpression(node, _s, anc) {
-    if (node.callee.type === 'Identifier' && GUARDS.has(node.callee.name)) guarded.add(owner(anc));
-  } });
+  // Does the continuation this write lives in ask the question? Keying by the outermost function
+  // let one guarded branch launder an unguarded one elsewhere in the same function.
+  const guardsIn = (fn) => {
+    let found = false;
+    walk.simple(fn, { CallExpression(n) {
+      if (n.callee.type === 'Identifier' && GUARDS.has(n.callee.name)) found = true;
+    } });
+    return found;
+  };
+  const enclosing = (anc) => {
+    for (let i = anc.length - 2; i >= 0; i--) {
+      if (isFn(anc[i]) && isContinuation(anc[i], anc[i - 1])) return anc[i];
+    }
+    return null;
+  };
 
   const globalReads = [], formWrites = [];
   walk.ancestor(ast, {
@@ -90,9 +100,6 @@ function analyze(src) {
       if (!RECORD_GLOBALS.has(node.name)) return;
       const p = anc[anc.length - 2];
       if (!p) return;
-      if (p.type === 'MemberExpression' && p.property === node && !p.computed) return;   // obj.editingId
-      if (p.type === 'Property' && p.key === node && !p.computed) return;                // {editingId: x}
-      if (p.type === 'AssignmentExpression' && p.left === node) return;                  // a write, not a read
       const fn = owner(anc);
       if (GUARDS.has(fn)) return;                                                        // the guard itself
       if (afterGap(anc, node.start)) globalReads.push({ fn, name: node.name, line: node.loc.start.line });
@@ -108,8 +115,8 @@ function analyze(src) {
         (n.type === 'BinaryExpression' && (mentionsFormField(n.left) || mentionsFormField(n.right)));
       if (!mentionsFormField(arg)) return;
       if (!afterGap(anc, node.start)) return;
-      const fn = owner(anc);
-      if (!guarded.has(fn)) formWrites.push({ fn, line: node.loc.start.line });
+      const cont = enclosing(anc);
+      if (!cont || !guardsIn(cont)) formWrites.push({ fn: owner(anc), line: node.loc.start.line });
     },
   });
   return { globalReads, formWrites };
@@ -161,6 +168,27 @@ test('rule 1 ignores assignments and property names that merely share the word',
     'a property of some other object is not the global');
 });
 
+test('rule 1 flags a global read inside a setTimeout, a dialog callback and an onload', () => {
+  assert.strictEqual(analyze('function f(){ setTimeout(function(){ save(editingId); },10); }').globalReads.length, 1,
+    'the discovery paste is a setTimeout — this shape must be caught');
+  assert.strictEqual(analyze('function f(){ showConfirm("m",function(){ del(editingId); }); }').globalReads.length, 1,
+    'deleteClient sits behind exactly this dialog');
+  assert.strictEqual(analyze('function f(){ var x=new XMLHttpRequest(); x.onload=function(){ save(editingId); }; }').globalReads.length, 1,
+    'a handler assignment is a gap too');
+});
+
+test('rule 2 flags a form write inside a setTimeout or a dialog callback', () => {
+  assert.strictEqual(analyze("function f(){ setTimeout(function(){ document.getElementById('f_resCity').value=x; },10); }").formWrites.length, 1);
+  assert.strictEqual(analyze("function f(){ showConfirm('m',function(){ document.getElementById('f_resCity').value=x; }); }").formWrites.length, 1);
+});
+
+test('a guard in one branch does not exempt an unguarded write elsewhere in the same function', () => {
+  const r = analyze("function f(id){ fetch(u).then(function(){ if(stillOnRecord(id)){log(1);} }); " +
+                    "fetch(v).then(function(){ document.getElementById('f_resCity').value=x; }); }");
+  assert.strictEqual(r.formWrites.length, 1,
+    'the second continuation never asks — it must still be flagged');
+});
+
 test('rule 2 flags an unguarded form write behind a gap, in both spellings', () => {
   const lit = analyze("function f(){ fetch(u).then(function(){ document.getElementById('f_resCity').value=x; }); }");
   assert.strictEqual(lit.formWrites.length, 1, JSON.stringify(lit.formWrites));
@@ -181,4 +209,10 @@ test('rule 2 ignores a guarded write, a synchronous one, and a non-form element'
 test('the analyser is being run against the real app.js, not an empty string', () => {
   assert.ok(appSrc.length > 50000, 'app.js looks too small to be the real file');
   assert.ok(/function stillOnRecord/.test(appSrc), 'the guard this test assumes is missing from app.js');
+});
+
+test('both allowlists are still empty', () => {
+  assert.deepStrictEqual(Object.keys(ALLOWED_GLOBAL_READ), [],
+    'an exemption is a decision to defend in review, not a way to make this pass');
+  assert.deepStrictEqual(Object.keys(ALLOWED_FORM_WRITE), []);
 });

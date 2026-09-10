@@ -38,7 +38,7 @@ test("a ZIP lookup landing after you switch patients does not fill the other pat
   let release;
   stub(w, { fetch: () => new Promise((res) => { release = () => res({ ok: true, json: () => Promise.resolve(ZIPPO) }); }) });
 
-  w.lookupZip(zipInput(w, '48201'), 'res', 'A');   // started while A is open
+  w.lookupZip(zipInput(w, '48201'), 'res', w.recordRef());   // started while A is open
   w.eval('editingId="B";');                         // operator opens another patient
   release();
   await tick(); await tick();
@@ -56,7 +56,7 @@ test('the same lookup still fills the address when you have not moved on', async
   let release;
   stub(w, { fetch: () => new Promise((res) => { release = () => res({ ok: true, json: () => Promise.resolve(ZIPPO) }); }) });
 
-  w.lookupZip(zipInput(w, '48201'), 'res', 'A');
+  w.lookupZip(zipInput(w, '48201'), 'res', w.recordRef());
   release();
   await tick(); await tick();
 
@@ -85,7 +85,7 @@ test("a county restore landing late does not repopulate the other patient's coun
   w.eval('editingId="A";ZIP_COUNTIES={};');
   const release = zipStub(w);
 
-  w.restoreCounty('48201', 'res', 'Wayne', 'A');
+  w.restoreCounty('48201', 'res', 'Wayne', w.recordRef());
   w.eval('editingId="B";');
   release();
   await tick(); await tick(); await tick();
@@ -101,7 +101,7 @@ test('a county restore for the record still on screen does populate it', async (
   w.eval('editingId="A";ZIP_COUNTIES={};');
   const release = zipStub(w);
 
-  w.restoreCounty('48201', 'res', 'Wayne', 'A');
+  w.restoreCounty('48201', 'res', 'Wayne', w.recordRef());
   release();
   await tick(); await tick(); await tick();
 
@@ -234,4 +234,32 @@ test('a discovery paste does not land in a patient you opened while it was pendi
     "the pasted intake data was written into patient B's form and would save onto them");
   assert.ok(toasts.some((t) => /different record/i.test(t)),
     'discarding the paste silently is its own failure — say so: ' + JSON.stringify(toasts));
+});
+
+// Every unsaved record has editingId === null, so an id-only guard cannot tell two of them apart —
+// and entering records back to back is the main workflow. A slow save for the first one reported
+// "still the same record" for the second, cleared its dirty flag and navigated away from it, so the
+// typed data went with no warning. That is why the guard carries a generation as well as an id.
+test('a slow save for one new record does not discard the next new record', async () => {
+  const w = loadApp();
+  resetStorage(w);
+  const h = saveHarness(w, { row_version: 'aaaaaaaaaaaaaaaa' });
+  if (!w.document.getElementById('formTitle')) {
+    w.document.body.insertAdjacentHTML('beforeend',
+      '<div id="formTitle"></div><button id="deleteBtn"></button><button id="deleteBtn2"></button>');
+  }
+  w.eval('editingId=null;');
+
+  w.saveClient();                       // new record one: saved, backend is slow
+  w.startNewApp('health');              // operator starts record two and types into it
+  w.document.getElementById('f_firstName').value = 'Second Patient';
+  w.markFormDirty();
+  const navsBefore = h.views.length;    // startNewApp navigates to the form itself
+  h.release();
+  await tick(); await tick();
+
+  assert.strictEqual(w._formDirty, true,
+    "the first record's save cleared the second record's unsaved-changes flag");
+  assert.strictEqual(h.views.length, navsBefore,
+    'and navigated away from a record that was still being typed into');
 });
