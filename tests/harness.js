@@ -81,7 +81,7 @@ function restoreStubs() {
 function resetStorage(win) {
   restoreStubs();
   win.localStorage.clear();
-  try { win.eval('clients = []; carriers = []; _recentRecords = []; _todos = []; _clientDocs = [];'); } catch (e) {}
+  try { win.eval('clients = []; carriers = []; _recentRecords = []; _todos = [];'); } catch (e) {}
 }
 
 /* Build the parts of the client form a test needs, taken from the REAL index.html so the element
