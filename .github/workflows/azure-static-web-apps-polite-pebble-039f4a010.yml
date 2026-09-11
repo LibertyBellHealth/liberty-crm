@@ -9,6 +9,15 @@ on:
     branches:
       - main
 
+# A PR merged while its preview build was still running left an orphaned preview environment:
+# the close job ran first with nothing to delete, then the build finished and uploaded. Orphans
+# filled every staging slot, so later PR previews failed. Grouping runs per PR lets the close run
+# cancel that in-flight build. Pushes to main get their own group and are never cancelled, so a
+# production deploy always runs to completion.
+concurrency:
+  group: swa-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build_and_deploy_job:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
