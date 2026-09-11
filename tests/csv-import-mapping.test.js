@@ -253,3 +253,85 @@ test('retrying failed rows reuses the confirmed mapping, not whatever is on scre
   assert.strictEqual(sent[1][0].first_name, 'A',
     'the retry must use the mapping the rows were confirmed under');
 });
+
+// ── Found by the independent review, written before the fixes ────────────────────────────────
+
+test('a "Carrier" column can be imported at all', () => {
+  const w = app();
+  const headers = ['First Name', 'Carrier'];
+  load(w, headers, [{ 'First Name': 'Ada', Carrier: 'BCBS' }]);
+  w.renderCsvMapping(headers);
+  assert.strictEqual(mapped(w, 'f_planCarrier'), 'Carrier',
+    'Carrier has no destination field, so the column is silently dropped');
+  const row = w.clientToDbRow(w._importRowToData(w.csvData[0]));
+  assert.strictEqual(row.plan_carrier, 'BCBS');
+});
+
+test('a qualified header still auto-maps', () => {
+  const w = app();
+  const headers = ['Client First', 'Client Last', 'Member Zip'];
+  load(w, headers, [{ 'Client First': 'Ada', 'Client Last': 'Lovelace', 'Member Zip': '48201' }]);
+  w.renderCsvMapping(headers);
+  assert.strictEqual(mapped(w, 'f_firstName'), 'Client First');
+  assert.strictEqual(mapped(w, 'f_lastName'), 'Client Last');
+  assert.strictEqual(mapped(w, 'f_resZip'), 'Member Zip');
+});
+
+test('the confirmation names the CSV columns that will be ignored', () => {
+  const w = app();
+  const headers = ['First Name', 'Widget Code', 'Internal Ref'];
+  load(w, headers, [{ 'First Name': 'Ada', 'Widget Code': 'X', 'Internal Ref': 'Y' }]);
+  w.renderCsvMapping(headers);
+  let msg = '';
+  stub(w, { showConfirm: (m) => { msg = String(m); } });
+  w.importClients();
+  assert.match(msg, /Widget Code/, 'an ignored column must be named: ' + msg);
+  assert.match(msg, /Internal Ref/);
+});
+
+test('changing a mapping clears its "guessed" marker', () => {
+  const w = app();
+  const headers = ['Primary Phone', 'Other'];
+  load(w, headers, [{ 'Primary Phone': '555', Other: 'x' }]);
+  w.renderCsvMapping(headers);
+  const sel = w.document.getElementById('map_f_phone');
+  assert.match(sel.parentNode.textContent, /guessed/, 'precondition: it was a guess');
+  sel.value = 'Other';
+  sel.dispatchEvent(new w.Event('change'));
+  assert.ok(!/guessed/.test(sel.parentNode.textContent),
+    'the operator chose this column — it is no longer a guess');
+});
+
+test('picking a new file clears a previous failure and its retry rows', async () => {
+  const w = app();
+  const headers = ['First Name'];
+  load(w, headers, [{ 'First Name': 'A' }]);
+  w.renderCsvMapping(headers);
+  stub(w, { fetch: () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }) });
+  w.importClients(); confirmOk(w);
+  await settle(); await settle();
+  assert.strictEqual(w._importFailedRows.length, 1, 'precondition: a failed batch is held');
+
+  // Operator picks a different file.
+  w.handleCSV({ target: { files: [new w.Blob(['Last Name\nLovelace\n'], { type: 'text/csv' })] } });
+  await new Promise((r) => setTimeout(r, 30));
+
+  assert.strictEqual(w._importFailedRows.length, 0,
+    "the previous file's rows are still queued behind a live Retry button");
+  assert.strictEqual(w.document.getElementById('importStatus').textContent, '',
+    "the previous file's failure banner is still on screen");
+});
+
+test('a rolled-back batch tells the operator nothing landed', async () => {
+  const w = app();
+  const headers = ['First Name'];
+  load(w, headers, [{ 'First Name': 'A' }]);
+  w.renderCsvMapping(headers);
+  stub(w, { fetch: () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({
+    error: 'Server error. Please try again.', inserted: 0,
+    detail: 'The whole batch was rolled back — no clients were imported.' }) }) });
+  w.importClients(); confirmOk(w);
+  await settle(); await settle();
+  assert.match(w.document.getElementById('importStatus').textContent, /rolled back/i,
+    'the one sentence saying nothing partially landed is dropped: ' + w.document.getElementById('importStatus').textContent);
+});

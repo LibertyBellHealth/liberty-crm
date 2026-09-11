@@ -14,6 +14,10 @@
 //      rule to find — and it was the worst instance in the file, because the f_* fields are static,
 //      reused between patients, and read straight back by getFormData on save.
 //
+// Known blind spot, stated rather than implied: an element id built into a VARIABLE first
+// (var id='f_'+k; getElementById(id)) is not matched. Tracking that needs dataflow, and a
+// hand-rolled version is wrong in both directions. Guard those by hand.
+//
 // Both lists are empty and must stay that way. An entry is a decision to be defended in review, not
 // a way to make the test pass; a long list is how the sibling app's version of this became
 // decoration. analyze() is exported to itself below and run against fixtures, because a static
@@ -61,6 +65,21 @@ function analyze(src) {
     return false;
   };
 
+  // Functions handed to a gap by name rather than written inline. `.then(_cb)` puts _cb's whole
+  // body after the gap just as surely as an inline function does.
+  const namedConts = new Set();
+  const declByName = new Map();
+  walk.simple(ast, { FunctionDeclaration(n) { if (n.id) declByName.set(n.id.name, n); } });
+  walk.simple(ast, { CallExpression(n) {
+    const c = n.callee;
+    const isGap = (c.type === 'Identifier' && GAP_CALLEES.has(c.name)) ||
+                  (c.type === 'MemberExpression' && c.property && GAP_METHODS.has(c.property.name));
+    if (!isGap) return;
+    n.arguments.forEach((a) => {
+      if (a.type === 'Identifier' && declByName.has(a.name)) namedConts.add(declByName.get(a.name));
+    });
+  } });
+
   const awaitsByFn = new Map();
   walk.ancestor(ast, { AwaitExpression(node, _s, anc) {
     for (let i = anc.length - 2; i >= 0; i--) {
@@ -73,7 +92,7 @@ function analyze(src) {
       const a = anc[i];
       if (!isFn(a)) continue;
       if (!inner) inner = a;
-      if (isContinuation(a, anc[i - 1])) return true;
+      if (isContinuation(a, anc[i - 1]) || namedConts.has(a)) return true;
     }
     return !!(inner && inner.async && awaitsByFn.has(inner) && awaitsByFn.get(inner).some((s) => s < start));
   };
@@ -89,7 +108,7 @@ function analyze(src) {
   };
   const enclosing = (anc) => {
     for (let i = anc.length - 2; i >= 0; i--) {
-      if (isFn(anc[i]) && isContinuation(anc[i], anc[i - 1])) return anc[i];
+      if (isFn(anc[i]) && (isContinuation(anc[i], anc[i - 1]) || namedConts.has(anc[i]))) return anc[i];
     }
     return null;
   };
@@ -106,12 +125,15 @@ function analyze(src) {
     },
     CallExpression(node, _s, anc) {
       const c = node.callee;
-      if (!(c.type === 'MemberExpression' && c.property && c.property.name === 'getElementById')) return;
+      const lookup = c.type === 'MemberExpression' && c.property &&
+                     (c.property.name === 'getElementById' || c.property.name === 'querySelector');
+      if (!lookup) return;
       const arg = node.arguments[0];
       if (!arg) return;
-      // 'f_notes', or 'f_'+prefix+'City'
+      // 'f_notes', '#f_notes', or 'f_'+prefix+'City'
       const mentionsFormField = (n) =>
-        (n.type === 'Literal' && typeof n.value === 'string' && n.value.indexOf('f_') === 0) ||
+        (n.type === 'Literal' && typeof n.value === 'string' &&
+          (n.value.indexOf('f_') === 0 || n.value.indexOf('#f_') === 0)) ||
         (n.type === 'BinaryExpression' && (mentionsFormField(n.left) || mentionsFormField(n.right)));
       if (!mentionsFormField(arg)) return;
       if (!afterGap(anc, node.start)) return;
@@ -215,4 +237,19 @@ test('both allowlists are still empty', () => {
   assert.deepStrictEqual(Object.keys(ALLOWED_GLOBAL_READ), [],
     'an exemption is a decision to defend in review, not a way to make this pass');
   assert.deepStrictEqual(Object.keys(ALLOWED_FORM_WRITE), []);
+});
+
+test('a continuation defined elsewhere and passed by name is still a continuation', () => {
+  const r = analyze("function _cb(){ save(editingId); } function f(){ fetch(u).then(_cb); }");
+  assert.strictEqual(r.globalReads.length, 1, 'a named callback hides the gap from a lexical check');
+  assert.strictEqual(r.globalReads[0].fn, '_cb');
+  const w = analyze("function _cb2(){ document.getElementById('f_resCity').value=x; } function g(){ setTimeout(_cb2,10); }");
+  assert.strictEqual(w.formWrites.length, 1, 'same for a form write');
+});
+
+test('querySelector reaches the same fields as getElementById', () => {
+  const r = analyze("function f(){ fetch(u).then(function(){ document.querySelector('#f_resCity').value=x; }); }");
+  assert.strictEqual(r.formWrites.length, 1);
+  const ok = analyze("function f(){ fetch(u).then(function(){ document.querySelector('.toast').textContent=x; }); }");
+  assert.strictEqual(ok.formWrites.length, 0, 'only the per-record f_* fields are save-backed');
 });

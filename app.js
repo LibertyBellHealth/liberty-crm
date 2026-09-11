@@ -608,7 +608,9 @@ function loadClients(){
 function _apiOk(r){
   if(r.ok)return r;
   return r.json().catch(function(){return null;}).then(function(body){
-    var err=new Error((body&&body.error)||('HTTP '+r.status));
+    var msg=(body&&body.error)||('HTTP '+r.status);
+    if(body&&body.detail)msg+=' — '+body.detail;
+    var err=new Error(msg);
     // Carry the status so callers can distinguish a lost-update conflict (409) from a
     // generic failure — they need different handling, not just a different message.
     err.status=r.status;
@@ -2341,7 +2343,7 @@ var CRM_IMPORT_FIELDS=[
   {key:'f_ssn',label:'SSN'},
   {key:'f_phone',label:'Phone'},{key:'f_email',label:'Email'},{key:'f_resAddress',label:'Address'},
   {key:'f_resCity',label:'City'},{key:'f_resSt',label:'State'},{key:'f_resZip',label:'Zip'},
-  {key:'f_planName',label:'Plan Name'},{key:'f_planType',label:'Plan Type'},{key:'f_premium',label:'Premium'},
+  {key:'f_planName',label:'Plan Name'},{key:'f_planCarrier',label:'Carrier'},{key:'f_planType',label:'Plan Type'},{key:'f_premium',label:'Premium'},
   {key:'f_subsidy',label:'Subsidy'},{key:'f_agent',label:'Agent'},{key:'f_leadSource',label:'Lead Source'},
   {key:'f_healthEffective',label:'Health Effective'},{key:'f_totalMonthly',label:'Total Monthly'},
   {key:'f_medicareNum',label:'Medicare #'},{key:'f_medicaid',label:'Medicaid #'},{key:'f_notes',label:'Notes'}
@@ -2424,6 +2426,7 @@ function _mapScore(header,field){
   // Prefix-match a synonym only when it is long enough to mean something. 'st' would otherwise
   // claim 'Status' for the State field — the same class of over-eager match this rule replaced.
   for(var j=0;j<syn.length;j++){ var sj=_norm(syn[j]); if(sj.length>=4&&h.indexOf(sj)===0)return 80; }
+  for(var k=0;k<syn.length;k++){ var sk=_norm(syn[k]); if(sk.length>=3&&h.indexOf(sk)>=0)return 45; }
   if(h.indexOf(l)===0)return 70;                       // header starts with the label
   if(l.indexOf(h)===0&&h.length>=4)return 60;          // label starts with the header
   if(h.indexOf(l)>=0&&l.length>=4)return 50;           // header contains the whole label
@@ -2437,7 +2440,11 @@ function renderCsvMapping(headers){
     var labelTd=document.createElement('td');labelTd.textContent=f.label;
     var selTd=document.createElement('td');
     var sel=document.createElement('select');sel.id='map_'+f.key;
-    sel.onchange=function(){this.dataset.guessed='';renderImportPreview();};
+    sel.onchange=function(){
+      var tag=this.parentNode&&this.parentNode.querySelector('.map-guessed');
+      if(tag)tag.parentNode.removeChild(tag);
+      renderImportPreview();
+    };
     var skip=document.createElement('option');skip.value='';skip.textContent='-- Skip --';
     sel.appendChild(skip);
     var best=null,bestScore=0;
@@ -2448,10 +2455,11 @@ function renderCsvMapping(headers){
       var sc=_mapScore(h,f);
       if(sc>bestScore){bestScore=sc;best=h;}   // strictly greater: ties keep the FIRST header
     });
-    if(best!==null){sel.value=best;sel.dataset.guessed=bestScore<100?'1':'';}
+    if(best!==null)sel.value=best;
     selTd.appendChild(sel);
     if(best!==null&&bestScore<100){
       var tag=document.createElement('span');
+      tag.className='map-guessed';
       tag.textContent=' guessed';
       tag.style.cssText='color:#b26a00;font-weight:600;font-size:11px;margin-left:6px;';
       selTd.appendChild(tag);
@@ -2514,6 +2522,9 @@ function handleCSV(event){
   reader.onload=function(e){
     var parsed=parseCSV(e.target.result);
     csvHeaders=parsed.headers;csvData=parsed.rows;
+    _importFailedRows=[];_importFailedMapping=null;
+    var st=document.getElementById('importStatus');
+    if(st){st.innerHTML='';st.textContent='';}
     if(!csvHeaders.length){toast('That file had no readable rows.','error');return;}
     renderCsvMapping(csvHeaders);
     document.getElementById('mappingSection').style.display='block';
@@ -2545,6 +2556,9 @@ function importClients(){
   CRM_IMPORT_FIELDS.forEach(function(f){ if(m[f.key])lines.push('   '+f.label+'  \u2190  '+m[f.key]); });
   var skipped=CRM_IMPORT_FIELDS.filter(function(f){return !m[f.key];}).map(function(f){return f.label;});
   if(skipped.length)lines.push('','Left empty: '+skipped.join(', '));
+  var used={};Object.keys(m).forEach(function(k){used[m[k]]=true;});
+  var ignored=(csvHeaders||[]).filter(function(h){return !used[h];});
+  if(ignored.length)lines.push('','Columns in your file that will NOT be imported: '+ignored.join(', '));
   lines.push('','Importing does not overwrite existing patients — it adds new ones.');
   // Capture the rows AND the mapping BEFORE the dialog. Both were read inside the callback, i.e.
   // at OK-press time, and the mapping was re-read from the DOM again for every batch — so a
