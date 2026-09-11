@@ -10,12 +10,18 @@ function toast(msg, type, duration){
   setTimeout(function(){ t.classList.remove('show'); setTimeout(function(){ if(t.parentNode)t.parentNode.removeChild(t); }, 300); }, duration);
 }
 
-var API_BASE    = 'https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net/api';
+// Served from localhost, talk to the DEV backend (fake data) so the app can be tested without
+// touching production. Every deployed host — the live site and PR previews — stays on production.
+// Run on port 4280: that is the origin allowed by dev's CORS and registered for sign-in.
+var _IS_LOCAL   = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+var API_BASE    = _IS_LOCAL
+  ? 'https://liberty-crm-api-dev.azurewebsites.net/api'
+  : 'https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net/api';
 var API_APP_ID  = '0c1627c1-c186-4e46-b919-e4a12f2f3952'; // Easy Auth app registration
 var _apiToken   = null; // cached Bearer token, refreshed automatically
 var SP_CLIENT_ID = '63828fd5-e676-4dd7-bfaa-0055fdb9b3c7';
 var SP_TENANT_ID = '12be0d3c-3e63-429f-bf46-1a2f746aa25f';
-var REDIRECT_URI  = 'https://polite-pebble-039f4a010.7.azurestaticapps.net';
+var REDIRECT_URI  = _IS_LOCAL ? location.origin : 'https://polite-pebble-039f4a010.7.azurestaticapps.net';
 
 // Health CRM is Paul + Tommy only. Rob has Home Care access but must NOT reach
 // Health PHI — the backend enforces this too via checkApiKey(req,'health').
