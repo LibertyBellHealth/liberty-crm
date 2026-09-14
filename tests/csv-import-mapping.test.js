@@ -29,6 +29,8 @@ function app() {
   // The import refreshes the roster when it finishes. That is correct behaviour but it shares the
   // fetch stub, so leave it out of these tests rather than teaching every stub to answer a GET.
   stub(w, { loadClients: () => {} });
+  // The duplicate check reads the current roster before the confirm opens; default to an empty CRM.
+  stub(w, { _fetchImportRoster: () => Promise.resolve([]) });
   return w;
 }
 const load = (w, headers, rows) =>
@@ -146,7 +148,7 @@ test('rows go to the transactional bulk endpoint, in batches', async () => {
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ inserted: n, ids: [] }) });
   } });
 
-  w.importClients(); confirmOk(w);
+  w.importClients(); await settle(); confirmOk(w);
   await settle(); await settle(); await settle();
 
   assert.strictEqual(seen.length, 2, 'three rows at a batch size of two should be two batches');
@@ -168,7 +170,7 @@ test('a rolled-back batch names the file lines that did not import, and can be r
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ inserted: 1, ids: [9] }) });
   } });
 
-  w.importClients(); confirmOk(w);
+  w.importClients(); await settle(); confirmOk(w);
   await settle(); await settle(); await settle();
 
   const status = w.document.getElementById('importStatus').textContent;
@@ -199,7 +201,7 @@ test('a mapping changed mid-import does not affect the batches still to go', asy
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ inserted: 1, ids: [1] }) });
   } });
 
-  w.importClients(); confirmOk(w);
+  w.importClients(); await settle(); confirmOk(w);
   await settle(); await settle(); await settle();
 
   assert.strictEqual(sent.length, 2, 'expected two batches, got ' + sent.length);
@@ -218,7 +220,7 @@ test('the audit entry records what actually imported, not what was attempted', a
     fetch: () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'Server error. Please try again.' }) }),
   });
 
-  w.importClients(); confirmOk(w);
+  w.importClients(); await settle(); confirmOk(w);
   await settle(); await settle(); await settle();
 
   assert.strictEqual(logged.length, 1, 'expected exactly one audit entry, got ' + logged.length);
@@ -241,7 +243,7 @@ test('retrying failed rows reuses the confirmed mapping, not whatever is on scre
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ inserted: 1, ids: [7] }) });
   } });
 
-  w.importClients(); confirmOk(w);
+  w.importClients(); await settle(); confirmOk(w);
   await settle(); await settle();
   assert.strictEqual(w._importFailedRows.length, 1);
 
@@ -277,7 +279,7 @@ test('a qualified header still auto-maps', () => {
   assert.strictEqual(mapped(w, 'f_resZip'), 'Member Zip');
 });
 
-test('the confirmation names the CSV columns that will be ignored', () => {
+test('the confirmation names the CSV columns that will be ignored', async () => {
   const w = app();
   const headers = ['First Name', 'Widget Code', 'Internal Ref'];
   load(w, headers, [{ 'First Name': 'Ada', 'Widget Code': 'X', 'Internal Ref': 'Y' }]);
@@ -285,6 +287,7 @@ test('the confirmation names the CSV columns that will be ignored', () => {
   let msg = '';
   stub(w, { showConfirm: (m) => { msg = String(m); } });
   w.importClients();
+  await settle();
   assert.match(msg, /Widget Code/, 'an ignored column must be named: ' + msg);
   assert.match(msg, /Internal Ref/);
 });
@@ -308,7 +311,7 @@ test('picking a new file clears a previous failure and its retry rows', async ()
   load(w, headers, [{ 'First Name': 'A' }]);
   w.renderCsvMapping(headers);
   stub(w, { fetch: () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }) });
-  w.importClients(); confirmOk(w);
+  w.importClients(); await settle(); confirmOk(w);
   await settle(); await settle();
   assert.strictEqual(w._importFailedRows.length, 1, 'precondition: a failed batch is held');
 
@@ -330,7 +333,7 @@ test('a rolled-back batch tells the operator nothing landed', async () => {
   stub(w, { fetch: () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({
     error: 'Server error. Please try again.', inserted: 0,
     detail: 'The whole batch was rolled back — no clients were imported.' }) }) });
-  w.importClients(); confirmOk(w);
+  w.importClients(); await settle(); confirmOk(w);
   await settle(); await settle();
   assert.match(w.document.getElementById('importStatus').textContent, /rolled back/i,
     'the one sentence saying nothing partially landed is dropped: ' + w.document.getElementById('importStatus').textContent);
