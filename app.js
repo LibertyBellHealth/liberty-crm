@@ -28,34 +28,18 @@ var ALLOWED_USERS = [
    quoted attribute values. Client data reaches the DOM from paste-import and CSV,
    so it is never safe to concatenate raw. Use textContent where practical instead. */
 var _fullRecordFailed=false; // true when GET /health-clients/{id} failed — blocks save
-// True between opening a record and its full row arriving. _fullRecordFailed covered the FAILURE
-// case, but nothing covered the window while the fetch is still in flight — and in that window the
-// form holds the LIST row, which deliberately omits ssn, card, routing and account. A save there
-// wrote those blanks over real stored values, and went out with no expected_version because
-// _rowVersion had not arrived either, so it also skipped the lost-update check.
+// True from opening a record until its full row arrives. Until then the form holds the list row,
+// which omits ssn/card/bank, and a save would write those blanks over real values.
 var _fullRecordLoading=false;
-// Optimistic-concurrency token for the record currently open in the form. Read from
-// GET /health-clients/{id} and sent back on save, so the server can refuse a write that
-// would silently overwrite someone else's newer edit (409). Null = unconditional write,
-// which is what a brand-new record and any pre-upgrade caller does.
+// Concurrency token for the open record, sent back on save so the server can refuse (409) a write
+// over someone else's newer edit. Null means an unconditional write, as for a new record.
 var _rowVersion=null;
-// ── "Is this still the record on screen?" ─────────────────────────────────────────────────────
-// Capture the id BEFORE any async gap, then gate the write:
+// ── "Is this still the record on screen?" ──────────────────────────────────────────────────
+// Capture before any async gap, then gate the write:
 //     var ref = recordRef();
 //     fetch(...).then(function(d){ if(!stillOnRef(ref)) return; ...write... });
-// editingId can change with NO click on the page — routeFromHash reassigns it on Back/Forward,
-// including while a confirm dialog is open — so every await, .then and timer is a real gap.
-//
-// This comparison used to be hand-copied at each site in two spellings. Home Care carried the
-// same convention as two divergent copies before they were consolidated; one definition is the
-// point. Named stillOnRecord, not stillOn, because the sibling app's helper takes (kind, id) and
-// this app has only one kind of record — a same-named, different-arity twin is worse than either.
-//
-// Null and '' both mean "a new, unsaved record", and they must compare equal: setFormData runs
-// for a blank form too, and a guard that failed closed there would silently drop the writes that
-// populate it.
-// Bumped every time the open record changes, including new -> new. editingId alone cannot tell two
-// UNSAVED records apart (both are null), so a save for one could clear the other's dirty flag.
+// editingId can change with no click (routeFromHash on Back/Forward, even under an open dialog).
+// Null and '' both mean an unsaved record; _recordGen tells two unsaved records apart.
 var _recordGen=0;
 // Identity of the record open right now, safe to compare across a gap even when it has no id yet.
 function recordRef(){ return {id:(editingId==null?'':editingId),gen:_recordGen}; }
@@ -81,18 +65,14 @@ function escHtml(v){
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
-/* For a value going inside a single-quoted JS string inside an HTML attribute
-   (e.g. onclick="f('...')"). Backslash MUST be escaped first or the quote escape
-   can be neutralised. Prefer data-* attributes + listeners over this. */
+// For a value inside a single-quoted JS string inside an HTML attribute. Escape backslash FIRST or
+// the quote escape can be neutralised. Prefer data-* attributes and listeners.
 function escJsAttr(v){
   return escHtml(String(v==null?'':v).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 }
 
-// Telemetry leaves our control, so PHI must never reach it. Every call site here passes ids
-// only — but that is discipline, not enforcement, and one careless aiTrack('X',{clientName:…})
-// regresses it silently. Drop any property whose KEY looks like PHI, whatever its value.
-// `user` is deliberately exempt: it is workforce identity (also set via
-// setAuthenticatedUserContext) and is what makes an event attributable.
+// Telemetry leaves our control, so drop any property whose KEY looks like PHI, whatever a call site
+// passes. `user` is exempt: it is workforce identity, not patient data.
 var _AI_PHI_KEY = /name|client|carrier|plan|email|phone|address|street|city|zip|county|dob|ssn|medicare|medicaid|routing|account|card|premium|income|referrer|employer|notes|file/i;
 function _aiScrub(props) {
   var out = {};
@@ -116,16 +96,8 @@ function aiTrack(name, props) {
   } catch (e) { /* silent */ }
 }
 
-/* HIPAA-oriented session inactivity: warn at 43 min, sign out at 45 min.
-
-   Only GENUINE interaction counts. mousemove and scroll used to reset this, which
-   meant any cursor drift — or a trackpad nudge, or an animated element scrolling —
-   kept an unattended session alive indefinitely, defeating the point. click /
-   keydown / touchstart require a person.
-
-   The timers are armed from refreshApiToken().then(...), NOT at sign-in: this
-   function no-ops while _apiToken is null, and at sign-in time the token has not
-   resolved yet, so arming it there silently did nothing. */
+// HIPAA idle sign-out: warn at 43 min, sign out at 45. Only click/keydown/touchstart count, so cursor
+// drift cannot keep an unattended session alive. Armed once the API token has resolved.
 var _sessionTimer=null, _sessionWarnTimer=null;
 var SESSION_TIMEOUT_MS = 45 * 60 * 1000;
 var SESSION_WARN_MS    = 43 * 60 * 1000;
@@ -145,21 +117,10 @@ function resetSessionTimer(){
   document.addEventListener(ev,resetSessionTimer,{passive:true,capture:true});
 });
 
-// Wipe every crm_* / crmCarriers / lch_* key EXCEPT an explicit whitelist of non-PHI
-// *preferences*, so a key added later is covered automatically instead of silently surviving
-// sign-out. The previous fixed list was already wrong: it named 'crm_carriers' and
-// 'crm_settings', NEITHER of which is ever written, while the real key `crmCarriers` (written
-// at saveCarriers) survived — and carrier names are operator-editable free text. It also
-// missed crm_default_agent and the crm_carriers_seed_* flags. crm_report_columns is a list of
-// COLUMN NAMES with no client data in it, and it has no server copy — it belongs with the other
-// per-device preferences, not in the wipe. Everything else here is mirrored to AppSettings and
-// comes back from the server at the next sign-in.
-// Home Care hit the same bug and replaced the same pattern; see its clearPHIFromStorage.
-// crm_todos is a TEMPORARY exception and the only one that is not a preference. It is the legacy
-// task list, and until migrateLegacyTodos has handed it to the server it is the ONLY copy — wiping
-// it here would silently destroy the agent's tasks on the first sign-out or tab close after this
-// change. Nothing writes the key any more, and the migration deletes it the moment the server
-// accepts every row, so it disappears on its own at the next successful sign-in.
+// Sign-out wipes every crm_* / crmCarriers / lch_* key except the non-PHI preferences listed here,
+// so a key added later is covered automatically; the rest comes back from AppSettings.
+// crm_todos is a temporary exception: until migrateLegacyTodos hands it to the server it is the only
+// copy of the agent's tasks. The migration deletes it once the server accepts every row.
 var _KEEP_ON_SIGNOUT = /(_col_widths|_page_size|_collapsed)$|^crm_display_name$|^crm_report_columns$|^crm_todos$/;
 function clearCRMStorage() {
   try {
@@ -170,10 +131,8 @@ function clearCRMStorage() {
       })
       .forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
   } catch (e) { /* storage unavailable — nothing to wipe */ }
-  // PHI also sits in MEMORY. `clients` holds the whole roster (names, DOB, addresses, last-4),
-  // and the open form holds DECRYPTED ssn / card / routing / account. Sign-out today navigates
-  // away via logoutRedirect, which takes both with it — but that is incidental, not a control,
-  // and it does not hold if the redirect is slow or cancelled.
+  // PHI also sits in memory: the roster, and decrypted ssn/card/bank in the open form. Clear it
+  // explicitly rather than relying on the logout redirect to discard the page.
   try { clients = []; carriers = []; } catch (e) {}
   try {
     document.querySelectorAll('#viewForm input, #viewForm textarea').forEach(function(el){
@@ -186,16 +145,8 @@ var msalInstance=null,_apiTokenTimer=null,clients=[],editingId=null,csvHeaders=[
 
 // ── MSAL authentication ────────────────────────────────────────
 function initMSAL(){
-  /* sessionStorage, not localStorage: tokens must not outlive the PHI they unlock.
-
-     clearCRMStorage wipes crm_* / crmCarriers / lch_* on sign-out AND on tab close, but it does
-     not touch msal.* — so the roster was being cleared while the access and refresh tokens that
-     fetch it all again were left on disk, surviving a browser restart. The 45-minute idle timeout
-     had the same hole: it signs out this tab, not the stored tokens.
-
-     Cost: tokens are no longer shared across tabs, so a second tab does its own silent
-     acquisition. With storeAuthStateInCookie and a live AAD session that is a redirect, not a
-     password prompt — the same "Verifying authentication…" path the login wall already shows. */
+  // sessionStorage, not localStorage: tokens must not outlive the PHI they unlock, and the sign-out
+  // wipe does not touch msal.* keys. Cost: each tab does its own silent sign-in.
   var config={auth:{clientId:SP_CLIENT_ID,authority:'https://login.microsoftonline.com/'+SP_TENANT_ID,redirectUri:REDIRECT_URI},cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true}};
   msalInstance=new msal.PublicClientApplication(config);
   msalInstance.initialize().then(function(){
@@ -291,16 +242,9 @@ function signOut(){
 }
 
 // ── API HELPERS ────────────────────────────────────────────────
-/* ── AUDIT (HIPAA §164.312(b)) ────────────────────────────────────────────────
-   This app recorded NOTHING. Opening a client pulls the DECRYPTED ssn, card, routing and
-   account number into the page, and none of that left a trace of who looked or when.
-   The backend endpoints already existed and were reachable; only the caller was missing.
-
-   scope:'health' is REQUIRED — without it these rows land in Liberty Home Care's AuditLog.
-   The two companies are separate legal entities and their audit trails are separate tables.
-
-   `who` / `actor` are set SERVER-SIDE from the authenticated identity and ignored from the
-   body, so the trail cannot be forged by a caller. */
+// ── AUDIT (HIPAA §164.312(b)) ──
+// scope:'health' is REQUIRED, or rows land in Home Care's AuditLog (separate legal entities).
+// `who`/`actor` are set server-side from the signed-in identity, so a caller cannot forge them.
 function currentUserEmail(){
   try{
     var acc=msalInstance&&msalInstance.getAllAccounts&&msalInstance.getAllAccounts();
@@ -309,18 +253,13 @@ function currentUserEmail(){
 }
 // MUST match what documents.js writes for clientType=health:
 //   LTRIM(RTRIM(ISNULL(first_name,'') + ' ' + ISNULL(last_name,'')))
-// client_name is the ONLY lookup key the audit search uses, so a mismatch splits one client's
-// history into two views that can never see each other.
+// client_name is the audit search's only key; a mismatch splits one client's history in two.
 function _auditName(c){
   if(!c)return '';
   return String((c.f_firstName||'')+' '+(c.f_lastName||'')).trim();
 }
-/* The audit trail lives SERVER-SIDE (POST /audit, read back by loadClientAudit). There used to be
-   a parallel localStorage mirror here holding the patient name on 200 entries deep. Nothing ever
-   read it — loadClientAudit has always gone to the API — so it was pure standing PHI on the disk of
-   every browser that had ever opened a record, in plain violation of the no-PHI-in-localStorage
-   rule that crm_recent and crm_todos were both already fixed for. Removing the writes does nothing
-   for the browsers that already have months of it, so purge on startup too. */
+// The audit trail is server-side only. Purge the old localStorage mirror on startup: nothing read
+// it, and it left patient names on disk.
 function purgeLegacyAuditLog(){try{localStorage.removeItem('crm_audit');}catch(e){}}
 function _postAuditRecord(body){
   // A failure here must be VISIBLE. A silently-dropped audit row is worse than a failed save:
@@ -346,15 +285,9 @@ function addAuditEntry(clientName,action){
 // out of any one client's tab while still being in the trail.
 function logActivity(type,text){ _postAuditRecord({event_type:type,client_name:'',action:text}); }
 
-/* ── SETTINGS SYNC ────────────────────────────────────────────────────────────
-   These were localStorage-only, so two agents on two machines saw DIFFERENT agent lists,
-   lead sources, plan types and carriers — and everything was lost on sign-out, since the
-   sign-out wipe (correctly) clears crm_*. Now mirrored to AppSettings under scope 'health'.
-
-   scope:'health' is required. AppSettings is keyed on (scope, setting_key) precisely so the
-   two companies can each have an 'agents' key without one silently overwriting the other.
-
-   `raw` marks the two values stored as bare strings rather than JSON. */
+// ── SETTINGS SYNC ──────────────────────────────────────────────
+// Mirrored to AppSettings under scope 'health' so every machine shares one list and sign-out loses
+// nothing. scope is required: both companies have an 'agents' key. `raw` = stored as a bare string.
 var _SYNCED_SETTINGS=[
   ['crm_agents','agents',false],
   ['crm_lead_sources','lead_sources',false],
@@ -374,16 +307,8 @@ function _syncedSetItem(k,v){
   clearTimeout(_settingsPushTimer);
   _settingsPushTimer=setTimeout(_pushSettings,800);
 }
-/* True once the server's copy has been read at least once this session — including a read that
-   came back empty, which is a legitimate first run. Until then this device's settings are NOT
-   authoritative and must never be pushed.
-
-   This matters because the sign-out / tab-close wipe clears every crm_* key, so a session starts
-   with nothing and depends on loadSettingsAPI to refill it. If that fetch fails, loadSettings()
-   has already fallen back to hardcoded defaults and carriers to an empty array — and the old
-   comment on the catch below, "the local values stand, and a later write pushes them", then meant
-   pushing DEFAULTS over the real list. One added agent would have replaced the server's agents
-   with the two built-ins plus that one; one added carrier would have replaced every carrier. */
+// True once the server copy has been read this session (an empty read counts). Until then this
+// device holds defaults, and pushing them would overwrite the agency's real lists.
 var _settingsLoaded=false;
 function _pushSettings(){
   if(!_apiToken)return;
@@ -412,9 +337,8 @@ function loadSettingsAPI(){
   return fetch(API_BASE+'/settings?scope=health',{headers:apiHeaders()})
     .then(_apiOk).then(function(r){return r.json();})
     .then(function(remote){
-      // The read succeeded, so this device is reconciled with the server and may push again.
-      // Set before the early returns below: "the server has nothing yet" is a successful read on
-      // a first run, and pushing local values up from there is exactly right.
+      // The read succeeded, so this device may push. Set before the early returns: an empty server copy
+      // on a first run is still a successful read.
       _settingsLoaded=true;
       // A local save is in flight — applying the server's older copy now would revert what the
       // user just typed. Home Care hit exactly this.
@@ -435,9 +359,8 @@ function loadSettingsAPI(){
       try{if(document.getElementById('viewSettings').style.display!=='none')renderSettings();}catch(err){}
     })
     .catch(function(e){
-      // Deliberately leaves _settingsLoaded false, so nothing this device holds can overwrite the
-      // server copy it never managed to read. Loud, because the lists on screen are now defaults
-      // rather than this agency's real ones, and that is not otherwise obvious.
+      // Leaves _settingsLoaded false so defaults can never overwrite a server copy we failed to read.
+      // Loud, because the lists on screen are now defaults rather than the agency's.
       toast('Could not load your saved settings ('+((e&&e.message)||'network error')+'). Agent, carrier and plan lists may be incomplete, and changes will not sync until you reload.','error',15000);
     });
 }
@@ -451,9 +374,8 @@ async function refreshApiToken(){
     var res=await msalInstance.acquireTokenSilent({scopes:[API_SCOPE],account:accounts[0]});
     _apiToken=res.accessToken;
     var ttl=res.expiresOn?(res.expiresOn.getTime()-Date.now()-600000):3000000;
-    // Keep the handle: an uncancelled refresh timer silently re-acquires a token after
-    // sign-out, and resetSessionTimer (gated on _apiToken) then re-arms — so the HIPAA idle
-    // sign-out would not actually hold if the logout redirect were slow or cancelled.
+    // Keep the handle: an uncancelled refresh timer re-acquires a token after sign-out and defeats the
+    // idle sign-out.
     clearTimeout(_apiTokenTimer);
     _apiTokenTimer=setTimeout(refreshApiToken,Math.max(ttl,60000));
   }catch(e){
@@ -487,12 +409,8 @@ function clientToDbRow(d){
     has_medicare:d.f_hasMedicare?1:0,
     medicare_num:d.f_medicareNum, medicare_a_eff:d.f_medicareA, medicare_b_eff:d.f_medicareB,
     has_medicaid:d.f_hasMedicaid?1:0, medicaid_num:d.f_medicaid, medicaid_eff:d.f_medicaidEff,
-    // undefined, not 0, when the form did not supply it. The backend filters an update to the
-    // columns actually present in the body (`body[f] !== undefined`) precisely so a save cannot
-    // touch what it was not given, and JSON.stringify drops undefined keys — but a default of 0
-    // is a real value, so it sailed through and cleared the flag on every save. There is no
-    // #f_waiveDental input any more (the flag moved into the Dental ancillary row), so the form
-    // NEVER supplies it: this column could only ever be 0. false still sends 0, an explicit clear.
+    // undefined, not 0, when the form did not supply it: the backend only updates columns present in
+    // the body, and 0 is a real value that would clear the flag on every save.
     waive_dental:d.f_waiveDental===undefined?undefined:(d.f_waiveDental?1:0), total_monthly:d.f_totalMonthly,
     health_pay_date:d.f_healthPayDate, health_effective:d.f_healthEffective,
     ancil_pay_date:d.f_ancilPayDate, ancil_effective:d.f_ancilEffective,
@@ -516,10 +434,8 @@ function clientToDbRow(d){
     doctors_json:JSON.stringify(d.doctors||[]),
     medications_json:JSON.stringify(d.meds||[]),
     ancil_plans_json:JSON.stringify(d.ancilPlans||[]),
-    // Same trap, worse consequence: `parseInt(undefined)||null` is null, a real value, so every
-    // save unlinked the Home Care record. There is no #f_homecareClientId input, so the form can
-    // never supply it — which is also why the client list's "homeCare" sort key can only ever
-    // read 0. An empty string still sends null, so an intentional unlink still works.
+    // Same for the Home Care link: null is a real value and would unlink on every save. An empty string
+    // still sends null, so an intentional unlink works.
     homecare_client_id:d.f_homecareClientId===undefined?undefined:(parseInt(d.f_homecareClientId)||null),
   };
 }
@@ -591,20 +507,14 @@ function loadClients(){
     renderReportCards();renderReminderBanner();refreshReferrerDatalist();
     renderSidebarRecent(); // names only resolvable once clients are in memory
   }).catch(function(e){
-    // Console-only was not enough. This runs after every save and delete, so a failure here left
-    // the agent looking at a roster that silently no longer matched the server — and on a 500 the
-    // error body is valid JSON, so `data.map` threw and even the render never ran. The roster
-    // already in memory is deliberately left alone: stale-but-labelled beats blank.
+    // Surface a failed reload. The roster already in memory is left alone: stale but labelled beats
+    // blank.
     console.error('Load error:',e);
     toast('Could not refresh the client list ('+(e&&e.message||'network error')+'). What you see may be out of date.','error',10000);
   });
 }
-/* Reject on a non-2xx instead of sailing through it.
-   The backend's 500 path returns {error:'...'} — VALID JSON — so a bare .then(r=>r.json())
-   RESOLVED on failure. saveClient then took its success branch: cleared the dirty flag and
-   called loadClients(), which repopulated the form from the server and DISCARDED the user's
-   edit, behind a green "Client saved!" toast. Surface the server's own message when it sends
-   one. This is the shape editClient already used; it was the only status check in the file. */
+// Reject on non-2xx. The backend's 500 body is valid JSON, so without this a failed save resolved
+// and took the success path. Surface the server's message when it sends one.
 function _apiOk(r){
   if(r.ok)return r;
   return r.json().catch(function(){return null;}).then(function(body){
@@ -665,15 +575,10 @@ function _doShowView(v){
 function openDiscoveryPasteModal(){var m=document.getElementById('discoveryPasteModal');if(m){document.getElementById('discoveryPasteInput').value='';m.style.display='flex';setTimeout(function(){document.getElementById('discoveryPasteInput').focus();},50);}}
 function closeDiscoveryPasteModal(){var m=document.getElementById('discoveryPasteModal');if(m)m.style.display='none';}
 
-/* Parse a filled discovery template into a client + members structure.
-   Recognizes labels ending in "-" or ":". Blank values are skipped. Spouse
-   and Child blocks only create members when they have any data. Ignores
-   fields the user chose to skip (SEP, HA/S/C, D/V, Preexisting Conditions,
-   Hospital, Rx (handled elsewhere), etc). */
-/* Every label parseDiscoveryText recognises. Used to distinguish a real "Label- value" line from
-   a LIST ITEM that merely contains a dash — "Metformin 500mg - twice daily", "Dr. Smith -
-   Cardiology". Both match the label pattern, and inside a collector both are data, not labels.
-   Arrays + indexOf rather than an object, so a value like "constructor" can't test truthy. */
+// Parse a filled discovery template into a client + members. Labels end in "-" or ":", blanks are
+// skipped, and Spouse/Child blocks only create members when they hold data.
+// Every recognised label, so a list item with a dash ("Metformin 500mg - twice daily") is not taken
+// for a label. Arrays + indexOf so a value like "constructor" can't test truthy.
 var _DISCOVERY_LABELS=['rx','medications','primary dr','primary doctor','specialist','dr visits',
   'lead source','phone number','phone','inquiry date','lead date','time','name','email','state',
   'zip','county','household income','date of birth','gender','m/f'];
@@ -754,10 +659,8 @@ function parseDiscoveryText(text){
       if(val)notesExtras.push('Dr Visits: '+val);
       continue;
     }
-    // Inside a collector, a line whose "label" is not one we recognise is a LIST ITEM that happens
-    // to contain a dash or colon, not a label. It used to be parsed as a label, dropped for
-    // matching nothing — and, because the next statement cleared the collector, every remaining
-    // line was dropped too. One "Metformin 500mg - twice daily" silently emptied the whole list.
+    // Inside a collector, an unrecognised "label" is a list item containing a dash or colon. Keep it as
+    // data rather than dropping it and the rest of the list.
     if(collecting&&!_isDiscoveryLabel(label,label.replace(/[^\w]/g,''))){
       if(collecting==='rx')addMed(line);
       else if(collecting==='primary_dr')addDoc(line,'Primary');
@@ -836,10 +739,8 @@ function importDiscoveryPaste(){
   closeDiscoveryPasteModal();
   // Boot up a new health app (clears form, opens edit view)
   startNewApp('health');
-  // startNewApp opened a BLANK record, so that is what this paste is for. Capture it: the whole
-  // timer body below writes into the static f_* fields, and 80ms is long enough to reach an
-  // existing patient by Back button or deep link — which would paste a stranger's intake data
-  // into their record and mark it dirty, ready to be saved over them.
+  // Pin the blank record this paste is for: the timer writes into the shared f_* fields, and 80ms is
+  // long enough to reach a real patient by Back button.
   var forRef=recordRef();
   // Populate — done in a timeout to let the view + starter rows render first
   setTimeout(function(){
@@ -949,9 +850,8 @@ function goToClientPage(n){_clientPage=n;renderClientTable(_clientFilteredCache.
 function toggleKebab(e){e.stopPropagation();var m=document.getElementById('clientKebabMenu');if(m)m.classList.toggle('open');}
 function closeKebab(){var m=document.getElementById('clientKebabMenu');if(m)m.classList.remove('open');}
 document.addEventListener('click',function(e){var w=document.querySelector('.kebab-wrap');if(w&&!w.contains(e.target))closeKebab();});
-/* Off-canvas sidebar for phones. Separate from toggleSidebar(), which is the DESKTOP
-   collapse-to-44px behaviour and is persisted; this one is transient and never stored, because
-   a drawer left "open" across loads would cover the app on the next visit. */
+// Phone drawer, separate from the persisted desktop collapse (toggleSidebar). Never stored: a drawer
+// left open would cover the app on the next visit.
 function toggleMobileSidebar(force){
   var sb=document.getElementById('sidebar');if(!sb)return;
   var open=(force===undefined)?!sb.classList.contains('mobile-open'):!!force;
@@ -1160,9 +1060,8 @@ var FIELDS=['firstName','mi','lastName','relation','marital','gender','tobacco',
   'billAddress','billZip','billCity','billSt','billCounty',
   'phone','phoneExt','altPhone','altPhoneExt','email','email2',
   'emergencyName','emergencyRelation','emergencyPhone',
-  // No 'cvv' here, and no #f_cvv input: PCI-DSS prohibits storing the card verification value
-  // after authorization, and the HealthClients.cvv column was dropped on 2026-09-03. Adding
-  // either one back would silently start capturing it again — the tests pin this.
+  // No 'cvv' field or input: PCI-DSS prohibits storing the card verification value, and the tests pin
+  // its absence. Do not add it back.
   'bankName','accountType','routing','account','accountName','cardType','cardNumber','cardExp',
   'healthPayDate','healthEffective','ancilPayDate','ancilEffective','dentalPayDate','dentalEffective','totalFirstMonth',
   'primaryEmployer','primaryIncome','spouseEmployer','spouseIncome',
@@ -1196,13 +1095,8 @@ function clearForm(){
   var rc=document.getElementById('f_resCounty');if(rc)rc.innerHTML='<option value=""></option>';
   var bc=document.getElementById('f_billCounty');if(bc)bc.innerHTML='<option value=""></option>';
 }
-/* The client's status is packed into the notes column as a leading "[STATUS:X]" marker so it
-   needs no column of its own (see getFormData). The form unpacked it; nothing else did, so every
-   other reader of f_notes saw the marker — including the Notes column of exportFullBackup and of
-   the advanced-search export, both of which are documents that leave the building.
-
-   Only a LEADING marker is structural. A note that mentions "[STATUS:...]" further down is the
-   client's own text and is left exactly as typed. */
+// Status is packed into notes as a leading "[STATUS:X]" marker (see getFormData); strip it for every
+// reader, exports included. Only a LEADING marker is structural; one mid-note is the client's text.
 var _STATUS_PREFIX=/^\[STATUS:([^\]]+)\]\n?/i;
 function clientNotesText(c){return String((c&&c.f_notes)||'').replace(_STATUS_PREFIX,'');}
 function clientStatus(c){
@@ -1244,9 +1138,8 @@ function getFormData(){
   var stEl=document.getElementById('f_status');
   var status=stEl?(stEl.value||'Active'):'Active';
   data.f_notes='[STATUS:'+status+']\n'+clientNotesText(data);
-  // Address type packing: prefix bill_address with [BILL] or [BOTH] when the user
-  // marked the extra address as billing or both. Mailing (default) gets no prefix
-  // for cleanliness. Only applies if the address is actually populated.
+  // Prefix bill_address with [BILL] or [BOTH] when the extra address is billing or both; mailing gets
+  // no prefix. Only when an address is present.
   var atEl=document.getElementById('f_addressType');
   var at=atEl?atEl.value:'Mailing';
   if(data.f_billAddress&&data.f_billAddress.trim()&&at&&at!=='Mailing'){
@@ -1332,10 +1225,8 @@ function editClient(id){
   _rowVersion=null; // cleared until the full record arrives with the real token
   try{clearForm();}catch(e){console.log('clearForm err:',e);}
   try{loadCarriersToSelect();}catch(e){}
-  // Populate from the list first so the form isn't blank while the fetch is in flight,
-  // then overwrite with the full record. The list deliberately omits SSN / card / bank,
-  // so we MUST fetch the real values before any save — otherwise the save would write
-  // the masked placeholders back over the real data.
+  // Fill from the list row so the form isn't blank, then overwrite with the full record. The list
+  // omits SSN/card/bank, so the real values must load before any save.
   try{setFormData(c);}catch(e){console.log('setFormData err:',e);}
   clearFormDirty();
   fetch(API_BASE+'/health-clients/'+encodeURIComponent(id),{headers:apiHeaders()})
@@ -1349,10 +1240,8 @@ function editClient(id){
     })
     .catch(function(){
       if(!stillOnRecord(id))return;
-      // Block saving rather than risk writing blanks over real SSN / card / bank values.
-      // Not what blocks the save on this path — _fullRecordFailed below does that, and no test
-      // can tell this line apart because of it. It is here so the flag stops claiming a load is
-      // still in flight when it has already failed.
+      // The load failed: block saving rather than write blanks over real SSN/card/bank values, and stop the
+      // loading flag claiming a fetch is still in flight.
       _fullRecordLoading=false;
       _fullRecordFailed=true;
       toast('Could not load the full record. Sensitive fields are hidden — saving is disabled until you reload.','error');
@@ -1381,9 +1270,8 @@ function editClient(id){
   loadClientAudit(_auditName(c),id);
 }
 
-/* Per-client access history. Reads the SAME table the writes above go to, and the same one
-   documents.js already writes Health document access into — so this shows real history
-   immediately, before any of the new write sites have fired even once. */
+// Per-client access history, read from the same audit table the writes above and documents.js write
+// to.
 function loadClientAudit(clientName,forId){
   var sec=document.getElementById('clientAuditSection');
   if(!sec)return;
@@ -1438,23 +1326,17 @@ function saveClient(onSuccess){
   if(_fullRecordFailed){toast('This record did not fully load. Reload the page before saving to avoid overwriting sensitive fields.','error');return;}
   if(_fullRecordLoading){toast('Still loading this record — give it a moment before saving.','info');return;}
   var isNew=!editingId;
-  // Pin the record this save is FOR. editingId can change while the request is in flight —
-  // routeFromHash reassigns it on Back/Forward with no click on the page — and every write in the
-  // continuation below was reading it fresh at resolution time.
+  // Pin the record this save is for: editingId can change while the request is in flight.
   var savedId=editingId, savedRef=recordRef();
   saveClientAPI(data,savedId).then(function(res){
     var still=stillOnRef(savedRef);
-    // Keep the token current so a second save in the same sitting isn't rejected as stale — but
-    // only while this is still the open record. The token belongs to the row just written;
-    // stamped into the global while someone else is open it becomes THEIR expected_version, and
-    // the server correctly refuses that save as a conflict against a row it does not match.
+    // Keep the token current for a second save, but only while this is still the open record; otherwise
+    // it becomes another patient's expected_version and their save gets a 409.
     if(res&&res.row_version&&still)_rowVersion=res.row_version;
     aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientId:savedId||'new'}); // no PHI in telemetry
     addAuditEntry(_auditName(data),isNew?'Client record created':'Profile information updated');
-    // _formDirty is global. Clearing it for a save that resolved after the operator opened a
-    // different patient silences guardUnsavedChanges for THAT patient, whose typed-but-unsaved
-    // edits are then discarded with no warning on the next navigation. This is the real damage
-    // in this continuation — the other two writes are recoverable, that one loses work.
+    // _formDirty is global: clearing it after the operator moved to another patient would drop that
+    // patient's unsaved-changes warning.
     if(still)clearFormDirty();
     loadClients();
     // Navigating is also a write of sorts: yanking the operator off a record they have since
@@ -1468,9 +1350,8 @@ function saveClient(onSuccess){
     toast(still?'Client saved!':('Saved '+(_auditName(data)||'that client')+'.'),'success');
   }).catch(function(e){
     if(e&&e.status===409){
-      // Someone else saved this record first. Deliberately do NOT clear the dirty flag, do NOT
-      // reload, and do NOT navigate — the user's edit is still on screen and reloading here is
-      // exactly what would discard it. Long toast because this needs a decision, not a glance.
+      // Someone else saved first. Do NOT clear the dirty flag, reload or navigate: the user's edit is still
+      // on screen. Long toast because this needs a decision.
       toast(e.message,'error',15000);
       return;
     }
@@ -1483,11 +1364,8 @@ function saveClient(onSuccess){
 }
 function deleteClient(){
   if(!editingId)return;
-  // Pin the target BEFORE the dialog opens. The confirm is not modal to the browser: `hashchange`
-  // fires on the Back button with no click on the page, and routeFromHash → editClient reassigns
-  // editingId behind the open dialog. Reading editingId in the callback read it at OK-press time,
-  // so a dialog naming one client could delete a different one — and file the audit row under the
-  // name of the record that survived.
+  // Pin the target before the dialog: Back reassigns editingId behind an open confirm, so reading it in
+  // the callback could delete a different client.
   var id=editingId;
   var c=clients.find(function(x){return String(x._id)===String(id);});
   var name=c?((c.f_firstName||'')+' '+(c.f_lastName||'')).trim():'this client';
@@ -1514,11 +1392,8 @@ function fmtMoneyBlur(el){
   if(!isNaN(v))el.value='$'+v.toFixed(2);
   else el.value='';
 }
-/* Phone extension — always collapsed on load; only shown when the user clicks.
-   The toggle itself surfaces the stored value ("Ext 4021") so a saved extension
-   is still discoverable while the input stays hidden. Stored in its own column
-   (phone_ext / alt_phone_ext) rather than packed into the phone string, which
-   would break formatPhone(), the tel: links and phone search. */
+// Phone extension: collapsed on load, the toggle shows any stored value. Its own column rather than
+// packed into the phone string, so formatPhone, tel: links and search keep working.
 function extLabel(w){
   var inp=document.getElementById('f_'+w+'Ext');
   var btn=document.getElementById('extToggle_'+w);
@@ -1648,10 +1523,8 @@ function showConfirm(message,onOk,opts){
 /* Unsaved-changes tracking on the client edit form.
    Set dirty on any input inside #viewForm; cleared by clearForm/setFormData/saveClient. */
 var _formDirty=false;
-/* Remove one entry from a settings list by VALUE. Every caller reads an index at click time and
-   acts on it after the dialog closes, and these lists can shift underneath an open dialog (a
-   settings pull, or the same list edited in another tab). Splicing the stale index removed a
-   neighbour instead. Returns false if the entry is already gone. */
+// Remove a settings entry by VALUE, not by an index read before the dialog: the list can shift under
+// it. Returns false if the entry is already gone.
 function _removeByValue(arr,value){
   if(value===undefined)return false;
   var i=arr.indexOf(value);
@@ -1687,11 +1560,8 @@ function guardUnsavedChanges(proceed){
 window.addEventListener('beforeunload',function(e){
   if(_formDirty){e.preventDefault();e.returnValue='';}
 });
-/* HIPAA: closing the tab is the common way this app is left — far more common than pressing Sign
-   out — and it used to leave everything clearCRMStorage clears sitting in the browser profile
-   until the next explicit sign-out. Internal navigation is hash-based and does not fire pagehide,
-   so this only runs on a real unload. Skipped when the page is going into bfcache, since it may
-   be restored. Everything here is re-fetched from the server on the next visit. */
+// HIPAA: closing the tab is the usual way out, so clear stored data on real unloads too. Skipped for
+// bfcache, which may restore the page; everything is re-fetched on the next visit.
 window.addEventListener('pagehide',function(e){
   if(e&&e.persisted)return;
   try{clearCRMStorage();}catch(_){}
@@ -1706,25 +1576,15 @@ function confirmRemoveRow(el,message,after){
 }
 function openMedsPasteModal(){var m=document.getElementById('medsPasteModal');if(m){document.getElementById('medsPasteInput').value='';m.style.display='flex';setTimeout(function(){document.getElementById('medsPasteInput').focus();},50);}}
 function closeMedsPasteModal(){var m=document.getElementById('medsPasteModal');if(m)m.style.display='none';}
-/* Parse one line into {name, mg, frequency}. Handles common formats:
-     Metformin 500mg BID
-     Lisinopril 10 mg once daily
-     Atorvastatin - 20mg - at bedtime
-     Just a plain name (no dose) → name only */
-/* Strip an ordinary list marker from the front of a pasted line: "1.", "2)", "-", "•", "*".
-   A marker is only a marker when something follows it, and a NUMBER only counts when it is
-   followed by . ) or ] — so "5-HTP 100mg" and "10mg Lipitor" keep their leading digits. */
+// Parse one line into {name, mg, frequency}: "Metformin 500mg BID", "Lisinopril 10 mg once daily",
+// "Atorvastatin - 20mg - at bedtime", or a bare name.
+// Strip a list marker ("1.", "2)", "-", "•", "*") only when text follows; a number counts only before
+// . ) or ], so "5-HTP 100mg" and "10mg Lipitor" keep their digits.
 function _stripListMarker(s){
   return s.replace(/^\s*(?:\d+\s*[.)\]]|[-•*\u2022])\s+/,'').trim();
 }
-/* Split a pasted line that holds MORE THAN ONE medication.
-
-   "Metformin 500mg, Lisinopril 10mg" is two medications; "Metformin 500mg, twice daily" is one
-   medication and its frequency. Same punctuation, opposite meanings. The tell is whether what
-   follows the separator carries a dose of its own, so only split when every following part does.
-   Splitting on every comma turned frequencies into medications; splitting on none absorbed a
-   whole medication into the previous one's frequency field. Both were happening, in different
-   places, on the same input. */
+// Split a line holding more than one medication: "Metformin 500mg, Lisinopril 10mg" is two, but
+// "Metformin 500mg, twice daily" is one. Split only when every later part carries its own dose.
 function _splitMedLine(line){
   var parts=String(line||'').split(/\s*[;,]\s*/).filter(function(p){return p.trim();});
   if(parts.length<2)return [String(line||'')];
@@ -1734,11 +1594,8 @@ function _splitMedLine(line){
 function parseMedLine(line){
   var s=_stripListMarker(String(line||'').replace(/[–—]/g,'-').replace(/\s+/g,' ').trim());
   if(!s)return null;
-  // Extract the dose. A number WITH a unit wins outright, wherever it sits in the line: taking
-  // the first number instead meant a name containing one ate the dose — "5-HTP 100mg" parsed as
-  // the name "5-HTP 100mg" with no dose, and so did every numbered list line before the marker
-  // above was stripped. Only when no unit appears anywhere do we fall back to a bare number, which
-  // is what makes "Metformin 30 twice" work (30 → dose, "twice" → frequency).
+  // A number WITH a unit is the dose wherever it sits, so a name like "5-HTP" can't swallow it. Only
+  // when no unit appears anywhere fall back to a bare number ("Metformin 30 twice").
   var doseMatch=s.match(/\b(\d+(?:\.\d+)?)\s*(mg|mcg|g|units?|iu|ml)\b/i)
               || s.match(/\b(\d+(?:\.\d+)?)\s*(mg|mcg|g|units?|iu|ml)?\b/i);
   if(!doseMatch)return{name:s.replace(/^-+|-+$/g,'').trim(),mg:'',frequency:''};
@@ -1847,11 +1704,8 @@ function formatCardExp(el){
   if(v.length>=3)v=v.slice(0,2)+'/'+v.slice(2);
   el.value=v;
 }
-/* Detect card brand from first digit; only auto-select if Card Type is still blank
-   so a manual override sticks. 3→Amex, 4→Visa, 5→Mastercard, 6→Discover. */
-/* Auto-fill helper: only overwrite an existing value if we set it ourselves
-   (tracked via data-autofilled). If the user manually typed/changed it, leave
-   it alone. Called whenever the source field changes. */
+// Card brand from the first digit (3 Amex, 4 Visa, 5 Mastercard, 6 Discover), only while Card Type is
+// blank. Auto-fills overwrite only values we set ourselves (data-autofilled), never typed ones.
 function _isSafeToAutofill(el){return el&&(!el.value||el.dataset.autofilled==='1');}
 function _setAutofilled(el,value){if(!el)return;el.value=value;el.dataset.autofilled='1';markFormDirty();}
 /* When the user manually edits an auto-filled field, drop the autofilled flag
@@ -1869,11 +1723,8 @@ function autoDetectCardType(el){
   if(!brand)return;
   if(_isSafeToAutofill(sel))_setAutofilled(sel,brand);
 }
-/* ROUTING_LOOKUP is loaded from routing-lookup.js — full FedACH directory
-   (18k+ US banks) generated from Moov's open-source github.com/moov-io/fed
-   dataset which mirrors the Federal Reserve FedACH Participants Directory. */
-/* Look up bank name from ABA routing number. Overwrites a previously auto-filled
-   bank name when the routing changes, but leaves manually-typed names alone. */
+// ROUTING_LOOKUP comes from routing-lookup.js (the FedACH directory, via github.com/moov-io/fed).
+// Fill the bank name from the routing number, replacing only a previous auto-fill, never a typed name.
 function lookupBankFromRouting(rn){
   var digits=(rn||'').replace(/\D/g,'');
   var bankInput=document.getElementById('f_bankName');
@@ -1911,11 +1762,8 @@ function carrierAC(el){
     return ap-bp;
   });
   list.innerHTML=matches.map(function(c){
-    // STORED XSS: carrier names are operator-editable free text persisted in localStorage, and
-    // both the element text and the JS-string attribute were unescaped. The ad-hoc
-    // .replace(/'/g,"\\'") escaped neither a backslash nor '<' nor '"'. escJsAttr handles the
-    // attribute case correctly (the HTML parser decodes entities BEFORE the JS runs, which is
-    // why escHtml alone is not enough there). Matches referrerAC, which already did this right.
+    // Carrier names are operator-editable free text: escape the text with escHtml and the onclick
+    // argument with escJsAttr (entities decode before the JS runs, so escHtml alone is not enough).
     return '<div onmousedown="document.getElementById(\'f_planCarrier\').value=\''+escJsAttr(c.name||'')+'\';document.getElementById(\'carrierACList\').style.display=\'none\';markFormDirty();">'+escHtml(c.name||'')+'</div>';
   }).join('');
   list.style.display='block';
@@ -1945,10 +1793,7 @@ function toggleReferredBy(){
   var field=document.getElementById('referredByField');
   if(field)field.style.display=/referral/i.test(v)?'':'none';
 }
-/* Build the referrer typeahead datalist from unique referrers already on file
-   so the same person's name doesn't get typed 5 different ways. */
-/* Backwards-compat stub — old callsite calls refreshReferrerDatalist() but the
-   real work is now inside referrerAC() (built on demand from current data). */
+// Backwards-compat stub for an old call site; referrerAC() builds the list on demand.
 function refreshReferrerDatalist(){}
 /* Build a case-insensitive index of existing canonical referrer names + counts
    from the current clients array. Canonical spelling is the most common one. */
@@ -1976,9 +1821,8 @@ function canonicalReferrerName(typed){
   var idx=buildReferrerIndex();
   return idx[t]?idx[t].name:null;
 }
-/* Autocomplete dropdown for the Referred By field. Shows existing referrers
-   with counts; last item is always "+ Add new" if the typed text doesn't
-   exactly match an existing entry. */
+// Referred By autocomplete: existing referrers with counts, plus "+ Add new" unless the text exactly
+// matches one.
 var _referrerPicked=false; // did the user explicitly pick or add this session?
 function referrerAC(el){
   var list=document.getElementById('referrerPicker');if(!list)return;
@@ -2005,9 +1849,8 @@ function referrerAC(el){
   updateReferrerFieldState(el,!!exact||!q);
 }
 function updateReferrerFieldState(el,valid){
-  // Amber outline when the typed name isn't a canonical existing entry AND
-  // the user hasn't explicitly picked / added — nudges them to pick, not
-  // silently create a phantom referrer.
+  // Amber outline when the name is new and wasn't explicitly picked or added, to avoid phantom
+  // referrers.
   if(!el)return;
   if(valid||_referrerPicked){el.style.borderColor='';el.title='';}
   else{el.style.borderColor='var(--dot-warning)';el.title='This is a new name — click "+ Add new referrer" in the dropdown to add them, or pick an existing one.';}
@@ -2050,9 +1893,7 @@ function populateCountySel(sel,counties,savedVal){
   counties.forEach(function(cn){var o=document.createElement('option');o.value=cn;o.textContent=cn;if(savedVal&&cn===savedVal)o.selected=true;sel.appendChild(o);});
   if(counties.length===1&&!savedVal)sel.options[0].selected=true;
 }
-/* Resolve a zip to its county list, preferring the bundled ZIP_COUNTIES dataset
-   (accurate multi-county coverage), falling back to FCC lat/lon lookup when the
-   zip isn't in the bundle (~9k unlisted zips like some PO-Box-only). */
+// ZIP to county list: the bundled ZIP_COUNTIES dataset first, FCC lat/lon lookup for zips it lacks.
 function bundledCounties(zip){
   if(typeof ZIP_COUNTIES==='undefined')return null;
   var v=ZIP_COUNTIES[zip];if(!v)return null;
@@ -2062,10 +1903,8 @@ function lookupZip(el,prefix,forRef){
   var zip=el.value.replace(/\D/g,'');if(zip.length!==5)return;
   fetch('https://api.zippopotam.us/us/'+zip).then(function(r){return r.json();}).then(function(data){
     if(!data.places||!data.places.length)return;
-    // f_resCity / f_resSt / f_resCounty are STATIC elements in index.html, cleared and reused for
-    // every patient rather than rebuilt — and getFormData reads them straight back on save. So a
-    // lookup that lands after the operator moved on does not merely render wrong: it writes one
-    // patient's city, state and county into another patient's record on the next save.
+    // The address fields are shared by every patient and saved by getFormData, so a lookup landing after
+    // the operator moved on would save one patient's address onto another.
     if(!stillOnRef(forRef))return;
     document.getElementById('f_'+prefix+'City').value=data.places[0]['place name']||'';
     document.getElementById('f_'+prefix+'St').value=data.places[0]['state abbreviation']||'';
@@ -2083,15 +1922,12 @@ function restoreCounty(zip,prefix,saved,forRef){
   if(bundled&&bundled.length&&sel){populateCountySel(sel,bundled,saved);return;}
   fetch('https://api.zippopotam.us/us/'+z).then(function(r){return r.json();}).then(function(data){
     if(!data.places||!data.places.length)return;
-    // No guard here: fetchCountiesForPlaces guards its own write, which is the last gap and the
-    // only place anything reaches the DOM. A second copy of the check is how the sibling app's
-    // convention drifted into two spellings.
+    // No guard here: fetchCountiesForPlaces guards the only write that reaches the DOM.
     fetchCountiesForPlaces(data.places,prefix,saved,forRef);
   }).catch(function(){});
 }
-/* Query FCC for EVERY place in a zip (a single zip can span multiple counties),
-   dedupe, then present all as options. If only one county is found, it's picked;
-   otherwise the user gets a proper dropdown to choose. */
+// Query FCC for every place in the zip (a zip can span counties) and dedupe. One county is selected;
+// several give a dropdown.
 function fetchCountiesForPlaces(places,prefix,saved,forRef){
   var sel=document.getElementById('f_'+prefix+'County');if(!sel)return;
   Promise.all(places.map(function(p){
@@ -2312,18 +2148,14 @@ function runReport(filter,title){
   document.getElementById('reportResult').style.display='block';
 }
 function exportReportExcel(){
-  // §164.528: a bulk extract of client records leaving the application is a disclosure and
-  // needs a record of its own. exportAdvSearchExcel can include routing / account / card
-  // columns, and had no trace at all.
+  // §164.528: a bulk export of client records is a disclosure and must leave an audit record.
   try{logActivity('export','report export downloaded by '+currentUserEmail());}catch(e){}
   var rows=[['Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Agent']];
   currentReportData.forEach(function(c){rows.push([(c.f_firstName||'')+' '+(c.f_lastName||''),c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_agent||'']);});
   dlXLSX(rows,'report.xlsx');
 }
 function exportExcel(){
-  // §164.528: this sends the WHOLE roster — names, DOB, phone, email, plan, premium — out of the
-  // application. The other three export paths recorded that; this one did not, so the largest
-  // extract of the four was the only one leaving no trace.
+  // §164.528: a bulk export of client records is a disclosure and must leave an audit record.
   try{logActivity('export','client list export downloaded by '+currentUserEmail());}catch(e){}
   var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Premium','Subsidy','Agent','Lead Source','Renewed']];
   clients.forEach(function(c){rows.push([c.f_firstName||'',c.f_lastName||'',c.f_dob||'',c.f_phone||'',c.f_email||'',c.f_planType||'',c.f_planName||'',c.f_premium||'',c.f_subsidy||'',c.f_agent||'',c.f_leadSource||'',c.f_renewed||'']);});
@@ -2339,7 +2171,7 @@ function dlXLSX(rows,filename){
 var CRM_IMPORT_FIELDS=[
   {key:'f_firstName',label:'First Name'},{key:'f_lastName',label:'Last Name'},
   {key:'f_dob',label:'Date of Birth'},{key:'f_gender',label:'Gender'},
-  // Full SSN is no longer returned by the list endpoint, so reports export the last 4 only.
+  // Maps to the full, encrypted ssn column.
   {key:'f_ssn',label:'SSN'},
   {key:'f_phone',label:'Phone'},{key:'f_email',label:'Email'},{key:'f_resAddress',label:'Address'},
   {key:'f_resCity',label:'City'},{key:'f_resSt',label:'State'},{key:'f_resZip',label:'Zip'},
@@ -2348,15 +2180,8 @@ var CRM_IMPORT_FIELDS=[
   {key:'f_healthEffective',label:'Health Effective'},{key:'f_totalMonthly',label:'Total Monthly'},
   {key:'f_medicareNum',label:'Medicare #'},{key:'f_medicaid',label:'Medicaid #'},{key:'f_notes',label:'Notes'}
 ];
-/* Split a CSV into headers + row objects, honouring quoted fields.
-
-   The old parser was `line.split(',')` after `text.split('\n')`, with every quote character
-   stripped afterwards. Any quoted field containing a comma — "123 Main St, Apt 4", or a notes
-   field with a comma in it, both of which any real export produces — shifted EVERY column after
-   it by one. The address became "123 Main St" and "Apt 4" was written into the next column, so
-   an import silently wrote wrong values into patient records with no error anywhere.
-
-   Handles: quoted commas, "" escapes, newlines inside quoted fields, CRLF and Excel's BOM. */
+// Split a CSV into headers + row objects. Handles quoted commas, "" escapes, newlines inside quotes,
+// CRLF and Excel's BOM; a plain split(',') shifts every column after a quoted comma.
 function parseCSV(text){
   text=String(text==null?'':text);
   var rows=[],row=[],field='',inQuotes=false;
@@ -2372,9 +2197,7 @@ function parseCSV(text){
     else if(ch!=='\r'){field+=ch;}               // bare \r only ever precedes the \n
   }
   row.push(field);rows.push(row);
-  // trim() also removes Excel's leading BOM (U+FEFF is whitespace to trim), which is why there
-  // is no separate BOM strip — without this the first header name would be '\uFEFFFirst Name'
-  // and every lookup against it would miss.
+  // trim() also strips Excel's BOM, so the first header isn't '\uFEFFFirst Name'.
   rows=rows.map(function(r){return r.map(function(v){return v.trim();});})
            .filter(function(r){return r.some(function(v){return v!=='';});});
   if(!rows.length)return {headers:[],rows:[]};
@@ -2386,9 +2209,7 @@ function parseCSV(text){
     })
   };
 }
-/* Column-mapping table. The option labels are the CSV's OWN header names — text from a file
-   someone was sent — and they used to be concatenated into markup raw, so a header like
-   <img src=x onerror=...> became a real element. Built as nodes now; nothing is parsed as HTML. */
+// Column-mapping table: header names come from an outside file, so build nodes, never markup.
 // Header wordings that mean the same CRM field but share no prefix with its label.
 var _IMPORT_SYNONYMS={
   f_firstName:['first','fname','givenname'],
@@ -2409,14 +2230,8 @@ var _IMPORT_SYNONYMS={
   f_notes:['notes','note','comments','remarks']
 };
 var _norm=function(v){return String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,'');};
-// How well a CSV header matches a CRM field. Higher is better; 0 means "do not guess".
-//
-// The old rule took the label's first four letters and selected EVERY header containing them,
-// so the LAST match won: "Date of Birth" -> "date" matched "Lead Date", "Effective Date" and
-// "Application Date", and a DOB column silently arrived from whichever came last. Across a
-// thousand patient records that is a scrambled dataset with no error anywhere. Now the single
-// best-scoring header wins, ties keep the first, and a weak match is left unmapped rather than
-// guessed at.
+// How well a CSV header matches a CRM field; 0 means "do not guess". The best score wins and ties keep
+// the first header, so a DOB column can't be taken from a later "Application Date".
 function _mapScore(header,field){
   var h=_norm(header), l=_norm(field.label);
   if(!h||!l)return 0;
@@ -2535,11 +2350,8 @@ function handleCSV(event){
 var IMPORT_BATCH_SIZE=500;      // the server's documented per-batch limit
 var _importFailedRows=[];       // rows from batches that rolled back, so they can be retried
 var _importFailedMapping=null;  // the mapping those rows were confirmed under
-// Post one batch through the TRANSACTIONAL bulk endpoint. Previously every row was its own
-// POST and all of them were fired at once: a thousand-record import meant a thousand concurrent
-// requests, each doing a Key Vault encrypt per protected column. What that produced was throttled
-// requests counted as "failed" — i.e. silently skipped patients — with no record of which ones.
-// One batch is one server-side transaction: it lands whole or not at all.
+// One batch is one server-side transaction through the bulk endpoint, so it lands whole or not at all
+// instead of throttled rows being silently skipped.
 function _importBatch(rows,mapping){
   var payload=rows.map(function(r){return clientToDbRow(_importRowToData(r,mapping));});
   return fetch(API_BASE+'/health-clients/bulk',{method:'POST',headers:apiHeaders(),body:JSON.stringify(payload)})
@@ -2549,9 +2361,8 @@ function importClients(){
   if(!csvData.length){toast('No rows to import.','error');return;}
   var m=_importMappings();
   if(!Object.keys(m).length){toast('Map at least one column before importing.','error');return;}
-  // Show the operator exactly what is about to be written, field by field. The mapping is partly
-  // guessed, the guesses are not always right, and after import a wrong column is indistinguishable
-  // from data the patient actually gave us — so this is the last point at which it can be caught.
+  // Show exactly what will be written, field by field: once imported, a wrong column looks like real
+  // patient data.
   var lines=['Import '+csvData.length+' record'+(csvData.length===1?'':'s')+'.','','Columns being imported:'];
   CRM_IMPORT_FIELDS.forEach(function(f){ if(m[f.key])lines.push('   '+f.label+'  \u2190  '+m[f.key]); });
   var skipped=CRM_IMPORT_FIELDS.filter(function(f){return !m[f.key];}).map(function(f){return f.label;});
@@ -2560,11 +2371,8 @@ function importClients(){
   var ignored=(csvHeaders||[]).filter(function(h){return !used[h];});
   if(ignored.length)lines.push('','Columns in your file that will NOT be imported: '+ignored.join(', '));
   lines.push('','Importing does not overwrite existing patients — it adds new ones.');
-  // Capture the rows AND the mapping BEFORE the dialog. Both were read inside the callback, i.e.
-  // at OK-press time, and the mapping was re-read from the DOM again for every batch — so a
-  // mapping edited part-way through an import would silently apply to the remaining batches only.
-  // That is the same defect this file has been fixing elsewhere: a decision made after an async
-  // gap must not re-derive its inputs from live state.
+  // Capture the rows and the mapping before the dialog, so editing the mapping mid-import can't change
+  // the batches still to go.
   var rows=csvData.slice(), mapping=m;
   showConfirm(lines.join('\n'),function(){_doImportClients(rows,mapping);},
     {title:'Confirm import',okText:'Import '+rows.length,danger:false});
@@ -2589,9 +2397,7 @@ function _doImportClients(rows,mapping){
       return _importBatch(b.rows,mapping).then(function(res){
         imported+=(res&&typeof res.inserted==='number')?res.inserted:b.rows.length;
       },function(e){
-        // The batch rolled back server-side, so every row in it is unimported. Report them by
-        // FILE line number (+2: one for the header row, one for 1-based counting) rather than a
-        // bare count, which left no way to tell which patients were missing.
+        // The batch rolled back, so report its rows by file line number (+2: header row, 1-based).
         failures.push({from:b.start+2,to:b.start+b.rows.length+1,error:String((e&&e.message)||e)});
         _importFailedRows=_importFailedRows.concat(b.rows);
       });
@@ -2789,9 +2595,8 @@ function showPrompt(title,message,defaultVal,onOk,opts){
 function renderCarriers(){
   var container=document.getElementById('carrierList');
   if(!container)return;
-  // One-time cleanup: purge any auto-seeded carriers (marked by an `availability`
-  // array) that don't have manually-entered contact info. User-added carriers
-  // stay put.
+  // One-time cleanup: drop auto-seeded carriers (they carry an `availability` array) that have no
+  // contact info.
   if(!localStorage.getItem('crm_carriers_seed_purged')){
     carriers=(carriers||[]).filter(function(c){
       var wasSeeded=Array.isArray(c.availability);
@@ -2858,9 +2663,7 @@ function fmtHeight(el){
 }
 
 // ===================== RECENT RECORDS =====================
-/* PHI-free recent records: persist only client IDs + access timestamps in
-   localStorage. Names / plan / agent are resolved from the in-memory clients
-   array at render time. Nothing sensitive ever hits disk. */
+// PHI-free: persist only client ids and access times; names resolve from the in-memory roster.
 var _recentRecords=[]; // [{id, accessed}]
 function loadRecentRecords(){
   try{
@@ -2914,10 +2717,8 @@ function renderRecentRecords(){
     el.appendChild(div);
   });
 }
-/* Sidebar Recent Records — last 5 openable clients, pinned above Sign Out.
-   Same PHI rule as the full list: only {id, accessed} is persisted, names are
-   resolved from the in-memory clients array here. Entries whose client no longer
-   exists are skipped rather than shown as placeholders (no room in the sidebar). */
+// Sidebar recent records: the last 5 openable clients. Same PHI rule, and missing clients are skipped
+// rather than shown as placeholders.
 function renderSidebarRecent(){
   var el=document.getElementById('sbRecentList');if(!el)return;
   el.innerHTML='';
@@ -3003,9 +2804,8 @@ function saveTodo(){
   document.getElementById('todoClientInput').value='';
   document.getElementById('todoClientId').value='';
   renderTodos();
-  // Show it immediately, then tell the truth about whether it actually saved. Nothing is kept on
-  // this device any more, so a task that never reached the server is gone at the next load —
-  // the agent has to be told that while the text is still on screen to re-enter.
+  // Show it immediately, then say whether it saved: nothing is kept locally, so an unsaved task is lost
+  // at the next load unless the agent re-enters it now.
   saveTaskAPI(t).then(function(){renderTodos();}).catch(function(e){
     t._unsaved=true;renderTodos();
     toast('Task NOT saved: '+((e&&e.message)||e)+'. It will disappear when you reload — please re-enter it.','error',15000);
@@ -3155,9 +2955,7 @@ function removeProjectCodeSetting(i){
   },{title:'Remove',okText:'Remove'});
 }
 function exportFullBackup(){
-  // §164.528: a bulk extract of client records leaving the application is a disclosure and
-  // needs a record of its own. exportAdvSearchExcel can include routing / account / card
-  // columns, and had no trace at all.
+  // §164.528: a bulk export of client records is a disclosure and must leave an audit record.
   try{logActivity('export','full backup export downloaded by '+currentUserEmail());}catch(e){}
   if(!clients.length){toast('No clients to export.','error');return;}
   var rows=[['First Name','Last Name','DOB','Phone','Email','Plan Type','Plan Name','Carrier','Premium','Subsidy','Total Monthly','App Fee','Agent','Lead Source','Renewed','State','City','ZIP','County','Medicare','Medicaid','Notes','App Date']];
@@ -3184,10 +2982,8 @@ function loadClientDocs(clientId){
   fetch(API_BASE+'/documents?clientType=health&clientId='+clientId,{headers:apiHeaders()})
   .then(function(r){return r.json();})
   .then(function(docs){
-    // The agent may have opened a different client while this was in flight, and
-    // #clientDocsSection is a SHARED element rebuilt per record — so a late response would render
-    // one client's document list (filenames routinely contain a patient's name) under another
-    // client's name. editClient already guards its own fetch this way; the sections did not.
+    // #clientDocsSection is shared and rebuilt per record, so drop a response for a client no longer on
+    // screen (document names often contain a patient's name).
     if(!stillOnRecord(clientId))return;
     renderClientDocs(clientId,docs);
   })
@@ -3217,11 +3013,8 @@ function renderClientDocs(clientId,docs){
       var safeUrl=/^https:\/\//i.test(d.url||'')?escHtml(d.url):'';
       row.innerHTML=icon+' <a href="'+safeUrl+'" target="_blank" rel="noopener noreferrer" style="flex:1;color:#1a3a5c;text-decoration:none;word-break:break-all;">'+escHtml(d.name)+'</a>'+
         '<span style="color:#999;font-size:10px;">'+kb+'</span>';
-      // The filename is data from outside this app — it arrives on a file someone was sent, and the
-      // backend only strips path separators and whitespace from it. It used to be interpolated into
-      // an onclick="deleteClientDoc('id','name')" attribute via encodeURIComponent, which leaves
-      // ' . ( ) untouched — enough for a name like  x'.concat(deleteClient())).concat('y.pdf  to
-      // close the string literal and run. A real element with a real listener never parses it as code.
+      // The filename comes from outside the app and could break out of an onclick string attribute. A real
+      // element with a listener never parses it as code.
       var delBtn=document.createElement('button');
       delBtn.className='btn btn-red';
       delBtn.style.cssText='padding:2px 8px;font-size:10px;';
@@ -3264,10 +3057,8 @@ function uploadClientDoc(clientId){
   });
   Promise.all(promises)
   .then(function(results){
-    // #docUploadStatus and the file input are SHARED elements that now belong to whichever client
-    // is on screen, so those writes are guarded. The toast is not: it is global, and an upload
-    // that did not save is not something to let the agent discover later just because they
-    // navigated away while it was in flight.
+    // The status element and file input belong to whichever client is on screen, so those writes are
+    // guarded. The toast is global and never suppressed: a failed upload must be reported.
     var stillOpen=stillOnRecord(clientId);
     var failed=results.filter(function(x){return !x.ok;});
     var okCount=results.length-failed.length;
@@ -3288,9 +3079,8 @@ function uploadClientDoc(clientId){
 }
 function deleteClientDoc(clientId,encodedName){
   showConfirm('Delete this document?',function(){
-    // The name goes in the BODY, not the query string: a document filename routinely embeds the
-    // patient's name, and URLs end up in access logs and request telemetry. The Home Care frontend
-    // moved to this shape when the backend added it; this one was left on the legacy ?name= path.
+    // Send the name in the body, not the query string: filenames often embed a patient's name, and URLs
+    // end up in access logs and telemetry.
     fetch(API_BASE+'/documents?clientType=health&clientId='+clientId,
       {method:'DELETE',headers:apiHeaders(),body:JSON.stringify({name:decodeURIComponent(encodedName)})})
     .then(_apiOk)
@@ -3302,11 +3092,8 @@ function deleteClientDoc(clientId,encodedName){
 }
 
 // initMSAL called below
-/* Street-address autocomplete REMOVED 2026-07-18. It sent partial patient street
-   addresses to nominatim.openstreetmap.org — a third party with no BAA, in a URL
-   query string. City/state/county still fill from the ZIP field (lookupZip), which
-   uses the bundled ZIP_COUNTIES dataset. Do not reintroduce a client-side geocoder;
-   proxy through our own API if this is ever wanted again. */
+// Street-address autocomplete was removed: it sent partial patient addresses to a third party with no
+// BAA. Do not reintroduce a client-side geocoder; proxy through our own API if it is ever needed.
 
 // ===================== ADVANCED SEARCH (canonical - with create date) =====================
 var _advSearchResults=[];
@@ -3385,9 +3172,7 @@ function advColumnsResetDefault(){REPORT_FIELDS.forEach(function(f){var el=docum
 document.addEventListener('change',function(e){if(e.target&&e.target.id&&e.target.id.indexOf('rpt_')===0)saveReportColumns();});
 
 function exportAdvSearchExcel(){
-  // §164.528: a bulk extract of client records leaving the application is a disclosure and
-  // needs a record of its own. exportAdvSearchExcel can include routing / account / card
-  // columns, and had no trace at all.
+  // §164.528: a bulk export of client records is a disclosure and must leave an audit record.
   try{logActivity('export','advanced-search export downloaded by '+currentUserEmail());}catch(e){}
   if(!_advSearchResults.length)return;
   var chosen=REPORT_FIELDS.filter(function(f){var el=document.getElementById('rpt_'+f[0]);return el?el.checked:f[2];});
@@ -3402,25 +3187,11 @@ function exportAdvSearchExcel(){
 // ===================== TO-DO LIST =====================
 var _todos=[];
 var _todoFilter='all';
-/* Same PHI rule as recent-records: only clientId is persisted, the name is
-   resolved from the in-memory clients array at render time. Migration below
-   strips clientName from any entry saved before this fix. */
-/* ── TASKS API (source='health') ──────────────────────────────────────────────
-   Tasks used to live in localStorage and nowhere else, which was wrong twice over.
-
-   1. Task text is operator free-text — "call Jane about her Medicaid renewal" — so the list
-      was PHI sitting at rest in the browser profile, the same rule crm_recent, crm_todos'
-      clientName and the audit mirror were all already fixed for.
-   2. clearCRMStorage wipes every crm_* key on sign-out, so the list was DESTROYED on every
-      sign-out, and existed on one device only.
-
-   The Tasks table has been there the whole time, discriminated by `source` and authorized per
-   entity (a Home Care user cannot read, edit, move or delete a health row). Home Care keeps a
-   localStorage cache on top of it; this app deliberately does not — the roster is already
-   memory-only here, and tasks now follow it.
-
-   `client_name` carries the client's ID for health rows, never the name: the UI resolves names
-   from the in-memory roster at render time, and nothing needs the name in the column. */
+// Only clientId is persisted; names resolve from the in-memory roster. The migration below strips old
+// clientName fields.
+// ── TASKS API (source='health') ─────────────────────────────────
+// Tasks live server-side only: task text is operator free text (PHI), and there is no local cache,
+// matching the memory-only roster. client_name holds the client ID for health rows, never the name.
 function _taskToBody(t){
   return {
     id:t.dbId||undefined,
@@ -3470,10 +3241,8 @@ function loadTasksAPI(){
       toast('Could not load tasks: '+((e&&e.message)||e)+'. This list may be incomplete.','error',10000);
     });
 }
-/* One-time move of whatever is still in localStorage on this device up to the server, BEFORE the
-   key is dropped. Without this, shipping the change would delete every task the agent had. The key
-   is only removed once every row it held has been accepted, so a failed migration retries next
-   sign-in rather than losing the list. */
+// One-time upload of any tasks still in localStorage. The key is removed only after every row is
+// accepted, so a failed migration retries at the next sign-in.
 function migrateLegacyTodos(){
   var legacy=[];
   try{legacy=JSON.parse(localStorage.getItem('crm_todos')||'[]');}catch(e){legacy=[];}
@@ -3561,10 +3330,8 @@ function renderTodos(){
     if(_todoFilter==='done')return t.done;
     return true;
   });
-  // The due date comes from an <input type="date">, whose value is the LOCAL calendar day.
-  // Comparing it against a UTC "today" made every evening wrong: from 8pm Michigan time until
-  // midnight, toISOString() already reports tomorrow, so a task due today rendered as Overdue
-  // and one due tomorrow rendered as Due Today.
+  // The due date is a LOCAL calendar day, so compare against local today, not UTC (after 8pm in
+  // Michigan, UTC is already tomorrow).
   var today=fmtToday();
   document.getElementById('todoEmpty').style.display=filtered.length===0?'block':'none';
   container.innerHTML='';
@@ -3685,9 +3452,7 @@ function renderSettingsList(arr,containerId,removeFunc){
   arr.forEach(function(item,i){
     var div=document.createElement('div');
     div.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f0;';
-    // STORED XSS: `item` is operator-typed free text (agents, lead sources, custom meds,
-    // renewal statuses, plan types, project codes) persisted to localStorage and re-rendered
-    // on every Settings visit. Six entry points through this one function.
+    // Escape: `item` is operator-typed free text from six settings lists, re-rendered on every visit.
     div.innerHTML='<span style="flex:1;font-size:12px;">'+escHtml(item)+'</span>'+
       '<button class="btn btn-red" style="padding:2px 8px;font-size:10px;" onclick="'+removeFunc+'('+i+')">Remove</button>';
     el.appendChild(div);
