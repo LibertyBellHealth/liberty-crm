@@ -10,12 +10,18 @@ function toast(msg, type, duration){
   setTimeout(function(){ t.classList.remove('show'); setTimeout(function(){ if(t.parentNode)t.parentNode.removeChild(t); }, 300); }, duration);
 }
 
-var API_BASE    = 'https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net/api';
+// Served from localhost, talk to the DEV backend (fake data) so the app can be tested without
+// touching production. Every deployed host — the live site and PR previews — stays on production.
+// Run on port 4280: that is the origin allowed by dev's CORS and registered for sign-in.
+var _IS_LOCAL   = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+var API_BASE    = _IS_LOCAL
+  ? 'https://liberty-crm-api-dev.azurewebsites.net/api'
+  : 'https://liberty-crm-api-cyb3dkhnd2e7a3cy.centralus-01.azurewebsites.net/api';
 var API_APP_ID  = '0c1627c1-c186-4e46-b919-e4a12f2f3952'; // Easy Auth app registration
 var _apiToken   = null; // cached Bearer token, refreshed automatically
 var SP_CLIENT_ID = '63828fd5-e676-4dd7-bfaa-0055fdb9b3c7';
 var SP_TENANT_ID = '12be0d3c-3e63-429f-bf46-1a2f746aa25f';
-var REDIRECT_URI  = 'https://polite-pebble-039f4a010.7.azurestaticapps.net';
+var REDIRECT_URI  = _IS_LOCAL ? location.origin : 'https://polite-pebble-039f4a010.7.azurestaticapps.net';
 
 // Health CRM is Paul + Tommy only. Rob has Home Care access but must NOT reach
 // Health PHI — the backend enforces this too via checkApiKey(req,'health').
@@ -217,6 +223,9 @@ function routeFromHash(){
   var m=h.match(/^\/client\/(.+)$/);
   if(!m)return;
   var id=decodeURIComponent(m[1]);
+  // editClient sets this hash itself; reopening here logged a second ePHI access per open.
+  var form=document.getElementById('viewForm');
+  if(String(id)===String(editingId)&&form&&form.style.display!=='none')return;
   // Wait a tick for clients to be in memory if we just loaded them
   var tryOpen=function(attempts){
     var c=(clients||[]).find(function(x){return String(x._id)===String(id);});
@@ -730,6 +739,21 @@ function parseDateStr(s){
   if(us){var y=us[3];if(y.length===2)y=(parseInt(y)>30?'19':'20')+y;return y+'-'+String(us[1]).padStart(2,'0')+'-'+String(us[2]).padStart(2,'0');}
   return t;
 }
+// Strict date reader for values that land in <input type="date">, which shows (and saves) '' for
+// anything but YYYY-MM-DD. Returns YYYY-MM-DD, '' for blank, or null when the value isn't a real
+// date. Two-digit years are refused: the century can't be told apart for birth vs effective dates.
+function _isoDate(s){
+  var t=String(s==null?'':s).trim();if(!t)return '';
+  t=t.replace(/[T ]\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?\s*(AM|PM|Z)?$/i,'');   // Excel/export time suffix
+  var y,mo,d,m=t.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(m){y=+m[1];mo=+m[2];d=+m[3];}
+  else if((m=t.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/))){y=+m[3];mo=+m[1];d=+m[2];}
+  else return null;
+  if(y<1900||y>2099)return null;
+  var dt=new Date(Date.UTC(y,mo-1,d));
+  if(dt.getUTCFullYear()!==y||dt.getUTCMonth()!==mo-1||dt.getUTCDate()!==d)return null;
+  return y+'-'+String(mo).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+}
 function formatPhoneStr(s){var d=(s||'').replace(/\D/g,'').slice(0,10);if(d.length!==10)return s;return '('+d.slice(0,3)+') '+d.slice(3,6)+'-'+d.slice(6);}
 
 function importDiscoveryPaste(){
@@ -1151,7 +1175,7 @@ function getFormData(){
   return data;
 }
 function setFormData(data){
-  FIELDS.forEach(function(f){var el=document.getElementById('f_'+f);if(!el||data['f_'+f]===undefined)return;if(el.type==='checkbox')el.checked=data['f_'+f]===true||data['f_'+f]==='true';else el.value=data['f_'+f]||'';});
+  FIELDS.forEach(function(f){var el=document.getElementById('f_'+f);if(!el||data['f_'+f]===undefined)return;if(el.type==='checkbox')el.checked=data['f_'+f]===true||data['f_'+f]==='true';else if(el.type==='date')el.value=_isoDate(data['f_'+f])||data['f_'+f]||'';else el.value=data['f_'+f]||'';});
   syncExtVisibility(); // reveal the Ext box only when this client actually has one
   document.getElementById('membersContainer').innerHTML='';
   if(data.members&&data.members.length)data.members.forEach(function(m){addMemberRow(m);});
@@ -1208,7 +1232,16 @@ function setFormData(data){
   updateMemberCount();checkWaiveDental();calcTotalMonthly();
   if(editingId)renderClientTodos(editingId);
 }
+// Every way of opening a record comes through here (search bars, Recent, task links, Back/Forward),
+// so the unsaved-changes check lives here rather than at each caller.
 function editClient(id){
+  var fromId=editingId;
+  guardUnsavedChanges(function(){_openClient(id);},function(){
+    // Back/Forward has already changed the URL; put it back without firing hashchange.
+    try{history.replaceState(null,'',fromId?'#/client/'+encodeURIComponent(fromId):location.pathname+location.search);}catch(e){}
+  });
+}
+function _openClient(id){
   var c=clients.find(function(x){return String(x._id)===String(id);});
   if(!c){toast('Could not find client record. Please refresh and try again.','error');return;}
   aiTrack('ClientRecordOpened',{clientId:id}); // no PHI in telemetry — id only
@@ -1541,7 +1574,7 @@ document.addEventListener('DOMContentLoaded',function(){
 });
 /* Called by showView() and Cancel button before actually navigating away from viewForm.
    Returns true if we should proceed immediately; otherwise shows a modal and calls proceed() later. */
-function guardUnsavedChanges(proceed){
+function guardUnsavedChanges(proceed,onStay){
   var cur=document.getElementById('viewForm');
   if(!cur||cur.style.display==='none'||!_formDirty){proceed();return;}
   showConfirm('You have unsaved changes. Save them before leaving?',
@@ -1550,6 +1583,7 @@ function guardUnsavedChanges(proceed){
       title:'Unsaved Changes',
       okText:'Discard & Leave',
       cancelText:'Stay',
+      onCancel:onStay,
       extraText:'Save & Leave',
       onExtra:function(){
         try{saveClient(function(){proceed();});}catch(e){_formDirty=false;proceed();}
@@ -2170,14 +2204,14 @@ function dlXLSX(rows,filename){
 
 var CRM_IMPORT_FIELDS=[
   {key:'f_firstName',label:'First Name'},{key:'f_lastName',label:'Last Name'},
-  {key:'f_dob',label:'Date of Birth'},{key:'f_gender',label:'Gender'},
+  {key:'f_dob',label:'Date of Birth',date:true},{key:'f_gender',label:'Gender'},
   // Maps to the full, encrypted ssn column.
   {key:'f_ssn',label:'SSN'},
   {key:'f_phone',label:'Phone'},{key:'f_email',label:'Email'},{key:'f_resAddress',label:'Address'},
   {key:'f_resCity',label:'City'},{key:'f_resSt',label:'State'},{key:'f_resZip',label:'Zip'},
   {key:'f_planName',label:'Plan Name'},{key:'f_planCarrier',label:'Carrier'},{key:'f_planType',label:'Plan Type'},{key:'f_premium',label:'Premium'},
   {key:'f_subsidy',label:'Subsidy'},{key:'f_agent',label:'Agent'},{key:'f_leadSource',label:'Lead Source'},
-  {key:'f_healthEffective',label:'Health Effective'},{key:'f_totalMonthly',label:'Total Monthly'},
+  {key:'f_healthEffective',label:'Health Effective',date:true},{key:'f_totalMonthly',label:'Total Monthly'},
   {key:'f_medicareNum',label:'Medicare #'},{key:'f_medicaid',label:'Medicaid #'},{key:'f_notes',label:'Notes'}
 ];
 // Split a CSV into headers + row objects. Handles quoted commas, "" escapes, newlines inside quotes,
@@ -2299,7 +2333,9 @@ function _importRowToData(row,mapping){
   var m=mapping||_importMappings(),data={};
   CRM_IMPORT_FIELDS.forEach(function(f){
     var col=m[f.key];
-    if(col&&row[col]!==undefined)data[f.key]=row[col];
+    if(!col||row[col]===undefined)return;
+    var iso=f.date?_isoDate(row[col]):null;
+    data[f.key]=iso===null?row[col]:iso;
   });
   data.f_agent=data.f_agent||'Thomas Jaboro';
   return data;
@@ -2357,25 +2393,84 @@ function _importBatch(rows,mapping){
   return fetch(API_BASE+'/health-clients/bulk',{method:'POST',headers:apiHeaders(),body:JSON.stringify(payload)})
     .then(_apiOk).then(function(r){return r.json();});
 }
+// File line of each row (header is line 1), kept on the row itself so skipped duplicates and retries
+// still report the lines the operator can find in the file.
+function _rowLine(row){return row&&row._line;}
+function _lineList(nums){
+  var out=[],i=0;
+  while(i<nums.length){
+    var j=i;while(j+1<nums.length&&nums[j+1]===nums[j]+1)j++;
+    out.push(i===j?String(nums[i]):(nums[i]+'\u2013'+nums[j]));
+    i=j+1;
+  }
+  return (nums.length===1?'line ':'lines ')+out.join(', ');
+}
+// Same first name, last name and date of birth. Punctuation and case don't count.
+function _patientKey(first,last,dob){
+  var n=function(v){return String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,'');};
+  if(!n(first)&&!n(last))return null;
+  return n(first)+'|'+n(last)+'|'+(_isoDate(dob)||'');
+}
+function _fetchImportRoster(){
+  return fetch(API_BASE+'/health-clients',{headers:apiHeaders()})
+    .then(_apiOk).then(function(r){return r.json();})
+    .then(function(data){return data.map(dbRowToClient);});
+}
 function importClients(){
   if(!csvData.length){toast('No rows to import.','error');return;}
   var m=_importMappings();
   if(!Object.keys(m).length){toast('Map at least one column before importing.','error');return;}
-  // Show exactly what will be written, field by field: once imported, a wrong column looks like real
-  // patient data.
-  var lines=['Import '+csvData.length+' record'+(csvData.length===1?'':'s')+'.','','Columns being imported:'];
-  CRM_IMPORT_FIELDS.forEach(function(f){ if(m[f.key])lines.push('   '+f.label+'  \u2190  '+m[f.key]); });
-  var skipped=CRM_IMPORT_FIELDS.filter(function(f){return !m[f.key];}).map(function(f){return f.label;});
-  if(skipped.length)lines.push('','Left empty: '+skipped.join(', '));
-  var used={};Object.keys(m).forEach(function(k){used[m[k]]=true;});
-  var ignored=(csvHeaders||[]).filter(function(h){return !used[h];});
-  if(ignored.length)lines.push('','Columns in your file that will NOT be imported: '+ignored.join(', '));
-  lines.push('','Importing does not overwrite existing patients — it adds new ones.');
-  // Capture the rows and the mapping before the dialog, so editing the mapping mid-import can't change
-  // the batches still to go.
-  var rows=csvData.slice(), mapping=m;
-  showConfirm(lines.join('\n'),function(){_doImportClients(rows,mapping);},
-    {title:'Confirm import',okText:'Import '+rows.length,danger:false});
+  var st=document.getElementById('importStatus');
+  var say=function(text){if(st){st.style.color='#b00';st.textContent=text;}toast(text,'error',15000);};
+  // Capture the rows and the mapping now, so editing the mapping mid-import can't change what's sent.
+  var rows=csvData.slice(), mapping=m, headers=(csvHeaders||[]).slice();
+  rows.forEach(function(r,i){if(r._line===undefined)Object.defineProperty(r,'_line',{value:i+2});});
+  // A date the form can't show is saved blank the first time anyone edits that patient, so refuse
+  // the file rather than import values that will quietly disappear.
+  var bad=[];
+  CRM_IMPORT_FIELDS.forEach(function(f){
+    if(!f.date||!mapping[f.key])return;
+    var lines=rows.filter(function(r){return _isoDate(r[mapping[f.key]])===null;});
+    if(lines.length)bad.push(f.label+' on '+_lineList(lines.map(_rowLine))+' (e.g. "'+lines[0][mapping[f.key]]+'")');
+  });
+  if(bad.length){
+    say('Nothing was imported. These dates could not be read (use MM/DD/YYYY or YYYY-MM-DD): '+bad.join('; ')+'.');
+    return;
+  }
+  if(st){st.style.color='';st.textContent='Checking for patients already in the CRM\u2026';}
+  _fetchImportRoster().then(function(existing){
+    if(st)st.textContent='';
+    var known={},seen={},isNew=[],inCrm=[],repeated=[];
+    existing.forEach(function(c){var k=_patientKey(c.f_firstName,c.f_lastName,c.f_dob);if(k)known[k]=true;});
+    rows.forEach(function(r){
+      var d=_importRowToData(r,mapping),k=_patientKey(d.f_firstName,d.f_lastName,d.f_dob);
+      if(k&&known[k])inCrm.push(r);
+      else if(k&&seen[k])repeated.push(r);
+      else{isNew.push(r);if(k)seen[k]=true;}
+    });
+    // Show exactly what will be written, field by field: once imported, a wrong column looks like
+    // real patient data.
+    var lines=['Import '+isNew.length+' of '+rows.length+' record'+(rows.length===1?'':'s')+'.','','Columns being imported:'];
+    CRM_IMPORT_FIELDS.forEach(function(f){ if(mapping[f.key])lines.push('   '+f.label+'  \u2190  '+mapping[f.key]); });
+    var skipped=CRM_IMPORT_FIELDS.filter(function(f){return !mapping[f.key];}).map(function(f){return f.label;});
+    if(skipped.length)lines.push('','Left empty: '+skipped.join(', '));
+    var used={};Object.keys(mapping).forEach(function(k){used[mapping[k]]=true;});
+    var ignored=headers.filter(function(h){return !used[h];});
+    if(ignored.length)lines.push('','Columns in your file that will NOT be imported: '+ignored.join(', '));
+    if(inCrm.length)lines.push('','Already in the CRM (same first name, last name and date of birth), skipped: '+_lineList(inCrm.map(_rowLine))+'.');
+    if(repeated.length)lines.push('','Repeated earlier in this file, skipped: '+_lineList(repeated.map(_rowLine))+'.');
+    lines.push('','Importing does not overwrite existing patients \u2014 it adds new ones.');
+    var dupes=inCrm.length+repeated.length;
+    showConfirm(lines.join('\n'),function(){if(isNew.length)_doImportClients(isNew,mapping);},{
+      title:'Confirm import',danger:false,
+      okText:isNew.length?('Import '+isNew.length):'Import nothing',
+      extraText:dupes?('Import all '+rows.length+' anyway'):'',
+      extraClass:'btn-red',
+      onExtra:function(){_doImportClients(rows,mapping);}
+    });
+  },function(e){
+    say('Nothing was imported: could not check for patients already in the CRM ('+((e&&e.message)||'network error')+'). Try again.');
+  });
 }
 function retryFailedImportRows(){
   if(!_importFailedRows.length)return;
@@ -2397,8 +2492,8 @@ function _doImportClients(rows,mapping){
       return _importBatch(b.rows,mapping).then(function(res){
         imported+=(res&&typeof res.inserted==='number')?res.inserted:b.rows.length;
       },function(e){
-        // The batch rolled back, so report its rows by file line number (+2: header row, 1-based).
-        failures.push({from:b.start+2,to:b.start+b.rows.length+1,error:String((e&&e.message)||e)});
+        // The batch rolled back: report its rows by file line.
+        failures.push({lines:b.rows.map(function(r,k){return _rowLine(r)||(b.start+k+2);}),error:String((e&&e.message)||e)});
         _importFailedRows=_importFailedRows.concat(b.rows);
       });
     });
@@ -2409,7 +2504,7 @@ function _doImportClients(rows,mapping){
     if(el){
       el.innerHTML='';
       if(failures.length){
-        var ranges=failures.map(function(f){return f.from===f.to?('line '+f.from):('lines '+f.from+'\u2013'+f.to);}).join('; ');
+        var ranges=failures.map(function(f){return _lineList(f.lines);}).join('; ');
         el.style.color='#b00';
         el.textContent='Imported '+imported+' of '+total+'. NOT imported: '+ranges+' \u2014 '+failures[0].error;
         var btn=document.createElement('button');
