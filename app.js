@@ -287,8 +287,10 @@ function _postAuditRecord(body){
     toast('Audit log write failed — this action was not recorded.','error',15000);
   });
 }
-function addAuditEntry(clientName,action){
-  _postAuditRecord({event_type:'audit',client_name:clientName,action:action});
+// clientId is what the row is FOUND by; the name is kept as what the record was called at the time.
+// Two patients can share a name, and a rename used to orphan a patient's whole history.
+function addAuditEntry(clientName,action,clientId){
+  _postAuditRecord({event_type:'audit',client_name:clientName,action:action,client_id:(clientId==null?'':clientId)});
 }
 // Global (non-client) events — exports, sign-in/out, denied access. client_name:'' keeps them
 // out of any one client's tab while still being in the trail.
@@ -1247,7 +1249,7 @@ function _openClient(id){
   aiTrack('ClientRecordOpened',{clientId:id}); // no PHI in telemetry — id only
   // The detail fetch below returns the DECRYPTED ssn, card, routing and account number, so
   // opening a record IS an ePHI access and has to be recorded as one.
-  addAuditEntry(_auditName(c),'Client record opened');
+  addAuditEntry(_auditName(c),'Client record opened',id);
   trackRecentRecord(id,c);
   // Deep-link URL so bookmarking / copy-link opens this client next time
   try{if(('#/client/'+id)!==window.location.hash)window.location.hash='/client/'+id;}catch(e){}
@@ -1312,7 +1314,9 @@ function loadClientAudit(clientName,forId){
     '<p style="font-size:11px;color:#999;">Loading…</p>';
   fetch(API_BASE+'/audit/search',{
     method:'POST',headers:apiHeaders(),
-    body:JSON.stringify({scope:'health',client:clientName,limit:100})
+    // Both keys: the id finds this patient's rows, the name still finds rows written before ids
+    // existed (the server only name-matches rows that have no id of their own).
+    body:JSON.stringify({scope:'health',client:clientName,client_id:(forId==null?'':forId),limit:100})
   })
   .then(_apiOk).then(function(r){return r.json();})
   .then(function(rows){
@@ -1367,7 +1371,8 @@ function saveClient(onSuccess){
     // it becomes another patient's expected_version and their save gets a 409.
     if(res&&res.row_version&&still)_rowVersion=res.row_version;
     aiTrack(isNew?'ClientCreated':'ClientUpdated',{clientId:savedId||'new'}); // no PHI in telemetry
-    addAuditEntry(_auditName(data),isNew?'Client record created':'Profile information updated');
+    // A create has no id until the server answers with one, so take it from the response.
+    addAuditEntry(_auditName(data),isNew?'Client record created':'Profile information updated',savedId||(res&&res.id));
     // _formDirty is global: clearing it after the operator moved to another patient would drop that
     // patient's unsaved-changes warning.
     if(still)clearFormDirty();
@@ -1405,7 +1410,7 @@ function deleteClient(){
   showConfirm('Delete '+(name||'this client')+'? This cannot be undone.',function(){
     // Logged BEFORE the delete: afterwards the record is gone and the name no longer resolves,
     // so the row would be filed under an id nobody can search for.
-    addAuditEntry(name,'CLIENT RECORD DELETED by '+currentUserEmail());
+    addAuditEntry(name,'CLIENT RECORD DELETED by '+currentUserEmail(),id);
     deleteClientAPI(id).then(function(){
       aiTrack('ClientDeleted',{clientId:id}); // no PHI in telemetry
       loadClients();showView('clients');
@@ -2128,7 +2133,7 @@ function bulkDelete(){
     // Per-client rows before the deletes, for the same reason as the single delete.
     ids.forEach(function(id){
       var c=clients.find(function(x){return String(x._id)===String(id);});
-      addAuditEntry(_auditName(c),'CLIENT RECORD DELETED by '+currentUserEmail()+' (bulk action)');
+      addAuditEntry(_auditName(c),'CLIENT RECORD DELETED by '+currentUserEmail()+' (bulk action)',id);
     });
     logActivity('delete',ids.length+' client records deleted in one bulk action by '+currentUserEmail());
     Promise.all(ids.map(function(id){return deleteClientAPI(id);})).then(function(){loadClients();document.getElementById('bulkDeleteBtn').style.display='none';});
